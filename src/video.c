@@ -1,0 +1,225 @@
+#include <string.h>
+#include "beelz.h"
+
+void video_init(void) {
+    /* 640x480 progressive VGA -- the Dreamcast's native "480p" mode.
+     * Flycast/redream and a real VGA box both accept this without
+     * additional negotiation. */
+    vid_set_mode(DM_640x480_VGA, PM_RGB565);
+
+    pvr_init_params_t params = {
+        { PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_0, PVR_BINSIZE_0, PVR_BINSIZE_0 },
+        512 * 1024,
+        0, 0, 0
+    };
+    pvr_init(&params);
+}
+
+void render_frame_begin(void) {
+    pvr_wait_ready();
+    pvr_scene_begin();
+}
+
+void render_bg_list_begin(void) { pvr_list_begin(PVR_LIST_OP_POLY); }
+void render_bg_list_end(void)   { pvr_list_finish(); }
+void render_sprite_list_begin(void) { pvr_list_begin(PVR_LIST_TR_POLY); }
+void render_sprite_list_end(void)   { pvr_list_finish(); }
+void render_frame_end(void) { pvr_scene_finish(); }
+
+static void submit_quad(const pvr_poly_hdr_t *hdr, float x0, float y0, float x1, float y1,
+                         float u0, float v0, float u1, float v1, uint32 argb) {
+    pvr_vertex_t v;
+    const float z = 1.0f;
+
+    pvr_prim((void *)hdr, sizeof(pvr_poly_hdr_t));
+
+    v.flags = PVR_CMD_VERTEX;
+    v.x = x0; v.y = y0; v.z = z; v.u = u0; v.v = v0; v.argb = argb; v.oargb = 0;
+    pvr_prim(&v, sizeof(v));
+
+    v.x = x0; v.y = y1; v.u = u0; v.v = v1;
+    pvr_prim(&v, sizeof(v));
+
+    v.x = x1; v.y = y0; v.u = u1; v.v = v0;
+    pvr_prim(&v, sizeof(v));
+
+    v.flags = PVR_CMD_VERTEX_EOL;
+    v.x = x1; v.y = y1; v.u = u1; v.v = v1;
+    pvr_prim(&v, sizeof(v));
+}
+
+static void frame_uv(const bz_texture_t *tex, int frame, int flip_x,
+                      float *u0, float *v0, float *u1, float *v1) {
+    int col = frame % tex->cols;
+    int row = frame / tex->cols;
+    float fu0 = (float)(col * tex->frame_w) / (float)tex->w;
+    float fv0 = (float)(row * tex->frame_h) / (float)tex->h;
+    float fu1 = fu0 + (float)tex->frame_w / (float)tex->w;
+    float fv1 = fv0 + (float)tex->frame_h / (float)tex->h;
+    if (flip_x) {
+        *u0 = fu1; *u1 = fu0;
+    } else {
+        *u0 = fu0; *u1 = fu1;
+    }
+    *v0 = fv0; *v1 = fv1;
+}
+
+void draw_tint_sprite(const bz_texture_t *tex, int frame, float x, float y, float w, float h,
+                       int flip_x, float alpha_mul, float r, float g, float b) {
+    float u0, v0, u1, v1;
+    frame_uv(tex, frame, flip_x, &u0, &v0, &u1, &v1);
+    uint8 a = (uint8)(bz_clampf(alpha_mul, 0.0f, 1.0f) * 255.0f);
+    uint32 argb = (a << 24) | ((uint8)(r * 255) << 16) | ((uint8)(g * 255) << 8) | (uint8)(b * 255);
+    submit_quad(&tex->hdr, x, y, x + w, y + h, u0, v0, u1, v1, argb);
+}
+
+void draw_sprite(const bz_texture_t *tex, int frame, float x, float y, float w, float h,
+                  int flip_x, float alpha_mul) {
+    draw_tint_sprite(tex, frame, x, y, w, h, flip_x, alpha_mul, 1.0f, 1.0f, 1.0f);
+}
+
+/* Draws a horizontally-tiling background layer wide enough to cover the
+ * screen for any scroll_x, using UV > 1.0 wrap (textures are POT so PVR
+ * wraps cleanly) instead of manually stamping multiple quads. */
+void draw_bg_scroll(const bz_texture_t *tex, float scroll_x, float y, float draw_w, float draw_h) {
+    float u_per_px = 1.0f / (float)tex->w;
+    float u0 = scroll_x * u_per_px;
+    float u1 = u0 + draw_w * u_per_px;
+    submit_quad(&tex->hdr, 0, y, draw_w, y + draw_h, u0, 0.0f, u1, 1.0f, 0xFFFFFFFF);
+}
+
+/* ---- flat-color quads (bars, HUD panels) -------------------------------*/
+
+static pvr_poly_hdr_t solid_hdr_op, solid_hdr_tr;
+static int solid_ready = 0;
+
+static void ensure_solid_headers(void) {
+    if (solid_ready) return;
+    pvr_poly_cxt_t cxt;
+    pvr_poly_cxt_col(&cxt, PVR_LIST_OP_POLY);
+    cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    pvr_poly_compile(&solid_hdr_op, &cxt);
+
+    pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
+    cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    cxt.gen.alpha = PVR_ALPHA_ENABLE;
+    cxt.blend.src = PVR_BLEND_SRCALPHA;
+    cxt.blend.dst = PVR_BLEND_INVSRCALPHA;
+    pvr_poly_compile(&solid_hdr_tr, &cxt);
+    solid_ready = 1;
+}
+
+/* Always submitted into the translucent list, even at alpha=255: PVR's
+ * pipeline renders OP_POLY *before* TR_POLY regardless of submission
+ * order within a frame, and every HUD caller (bars, panels) needs to sit
+ * visually on top of the (translucent, ARGB4444) game-world sprites. Call
+ * HUD draw_quad/draw_bar/draw_text* only between render_sprite_list_begin
+ * and render_sprite_list_end, after drawing world sprites, so they also
+ * win the same-list submission-order tiebreak (see beelz.h). */
+void draw_quad(float x, float y, float w, float h, uint8 r, uint8 g, uint8 b, uint8 a) {
+    ensure_solid_headers();
+    uint32 argb = (a << 24) | (r << 16) | (g << 8) | b;
+    (void)solid_hdr_op;
+    submit_quad(&solid_hdr_tr, x, y, x + w, y + h, 0, 0, 0, 0, argb);
+}
+
+void draw_bar(float x, float y, float w, float h, float pct, uint8 r, uint8 g, uint8 b) {
+    pct = bz_clampf(pct, 0.0f, 1.0f);
+    draw_quad(x, y, w, h, 40, 40, 40, 255);          /* backing plate */
+    draw_quad(x + 2, y + 2, (w - 4) * pct, h - 4, r, g, b, 255);
+    draw_quad(x, y, w, 2, 230, 230, 230, 255);        /* border */
+    draw_quad(x, y + h - 2, w, 2, 230, 230, 230, 255);
+    draw_quad(x, y, 2, h, 230, 230, 230, 255);
+    draw_quad(x + w - 2, y, 2, h, 230, 230, 230, 255);
+}
+
+/* ---- HUD text: bfont rendered into small persistent PVR textures -------
+ *
+ * A texture handed to pvr_prim() is only *referenced* by the TA command
+ * list -- the GPU doesn't actually read it until rasterization, which
+ * happens asynchronously after pvr_scene_finish(). Freeing/reusing the
+ * VRAM right after submitting the quad (as a naive "build texture, draw
+ * it, free it" helper would) races the GPU and shows up as corrupted or
+ * flickering text. So each HUD text slot owns its own persistent texture
+ * and we only re-upload (replacing, never freeing-while-in-flight) when
+ * the string actually changes. */
+
+#define TXT_MAX_CHARS 32
+#define TXT_CHAR_PX 12
+#define TXT_SLOTS 8
+
+typedef struct {
+    char text[TXT_MAX_CHARS + 1];
+    pvr_ptr_t vram;
+    pvr_poly_hdr_t hdr;
+    int bufw;
+    int used;
+} bz_text_slot_t;
+
+static bz_text_slot_t g_text_slots[TXT_SLOTS];
+
+static void upload_text_slot(bz_text_slot_t *slot, const char *str) {
+    static uint16 buf[TXT_CHAR_PX * (TXT_CHAR_PX * TXT_MAX_CHARS)];
+    int len = (int)strlen(str);
+    if (len > TXT_MAX_CHARS) len = TXT_MAX_CHARS;
+    if (len <= 0) len = 1;
+    int bufw = TXT_CHAR_PX * len;
+
+    for (int i = 0; i < bufw * TXT_CHAR_PX; i++)
+        buf[i] = 0x0861; /* dark charcoal plaque, RGB565 */
+
+    char tmp[TXT_MAX_CHARS + 1];
+    memcpy(tmp, str, len);
+    tmp[len] = 0;
+    bfont_draw_str(buf, bufw, 1, tmp);
+
+    size_t bytes = (size_t)bufw * TXT_CHAR_PX * 2;
+    if (slot->vram && slot->bufw != bufw) {
+        pvr_mem_free(slot->vram);
+        slot->vram = NULL;
+    }
+    if (!slot->vram)
+        slot->vram = pvr_mem_malloc(bytes);
+    if (!slot->vram) { slot->used = 0; return; }
+    pvr_txr_load(buf, slot->vram, bytes);
+
+    /* TR_POLY, not OP_POLY: PVR always composites OP_POLY before TR_POLY,
+     * so an opaque-list text quad would render *behind* the (translucent,
+     * ARGB4444) game sprites no matter when it's submitted. Alpha=255 on
+     * the vertex color makes the SRCALPHA/INVSRCALPHA blend equivalent to
+     * fully opaque, so this still looks like a solid plaque. */
+    pvr_poly_cxt_t cxt;
+    pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                      PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED,
+                      bufw, TXT_CHAR_PX, slot->vram, PVR_FILTER_NEAREST);
+    cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    cxt.gen.alpha = PVR_ALPHA_ENABLE;
+    cxt.blend.src = PVR_BLEND_SRCALPHA;
+    cxt.blend.dst = PVR_BLEND_INVSRCALPHA;
+    pvr_poly_compile(&slot->hdr, &cxt);
+
+    slot->bufw = bufw;
+    strncpy(slot->text, tmp, TXT_MAX_CHARS);
+    slot->text[TXT_MAX_CHARS] = 0;
+    slot->used = 1;
+}
+
+/* slot: which persistent HUD text element this is (0..TXT_SLOTS-1) --
+ * callers should use a stable slot per on-screen label (health readout,
+ * wave counter, boss name, ...) so re-uploads only happen on real
+ * content changes. */
+void draw_text_slot(int slot, const char *str, float x, float y, float scale) {
+    if (slot < 0 || slot >= TXT_SLOTS) return;
+    bz_text_slot_t *s = &g_text_slots[slot];
+    if (!s->used || strcmp(s->text, str) != 0)
+        upload_text_slot(s, str);
+    if (!s->used) return;
+    submit_quad(&s->hdr, x, y, x + s->bufw * scale, y + TXT_CHAR_PX * scale, 0, 0, 1, 1, 0xFFFFFFFF);
+}
+
+void draw_text(const char *str, float x, float y, float scale) {
+    draw_text_slot(0, str, x, y, scale);
+}

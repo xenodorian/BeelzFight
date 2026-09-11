@@ -1,0 +1,285 @@
+{
+  "sheets": {
+    "player": {
+      "file": "player.png",
+      "frame_w": 64,
+      "frame_h": 64,
+      "sheet_w": 512,
+      "sheet_h": 512,
+      "cols": 8,
+      "anims": {
+        "idle": {
+          "start": 0,
+          "count": 4,
+          "fps": 5,
+          "loop": true
+        },
+        "run": {
+          "start": 4,
+          "count": 4,
+          "fps": 10,
+          "loop": true
+        },
+        "attack1": {
+          "start": 8,
+          "count": 4,
+          "fps": 14,
+          "loop": false
+        },
+        "attack2": {
+          "start": 12,
+          "count": 4,
+          "fps": 14,
+          "loop": false
+        },
+        "attack3": {
+          "start": 16,
+          "count": 4,
+          "fps": 16,
+          "loop": false
+        },
+        "attack4": {
+          "start": 20,
+          "count": 5,
+          "fps": 14,
+          "loop": false
+        },
+        "parry": {
+          "start": 25,
+          "count": 2,
+          "fps": 12,
+          "loop": false
+        },
+        "block": {
+          "start": 27,
+          "count": 2,
+          "fps": 6,
+          "loop": true
+        },
+        "hit": {
+          "start": 29,
+          "count": 2,
+          "fps": 8,
+          "loop": false
+        },
+        "death": {
+          "start": 31,
+          "count": 5,
+          "fps": 6,
+          "loop": false
+        }
+      }
+    },
+    "imp": {
+      "file": "imp.png",
+      "frame_w": 64,
+      "frame_h": 64,
+      "sheet_w": 256,
+      "sheet_h": 256,
+      "cols": 4,
+      "anims": {
+        "idle": {
+          "start": 0,
+          "count": 3,
+          "fps": 4,
+          "loop": true
+        },
+        "walk": {
+          "start": 3,
+          "count": 4,
+          "fps": 9,
+          "loop": true
+        },
+        "attack": {
+          "start": 7,
+          "count": 3,
+          "fps": 12,
+          "loop": false
+        },
+        "death": {
+          "start": 10,
+          "count": 3,
+          "fps": 6,
+          "loop": false
+        }
+      }
+    },
+    "thrall": {
+      "file": "thrall.png",
+      "frame_w": 64,
+      "frame_h": 64,
+      "sheet_w": 256,
+      "sheet_h": 256,
+      "cols": 4,
+      "anims": {
+        "idle": {
+          "start": 0,
+          "count": 2,
+          "fps": 3,
+          "loop": true
+        },
+        "walk": {
+          "start": 2,
+          "count": 4,
+          "fps": 8,
+          "loop": true
+        },
+        "attack": {
+          "start": 6,
+          "count": 3,
+          "fps": 11,
+          "loop": false
+        },
+        "death": {
+          "start": 9,
+          "count": 3,
+          "fps": 6,
+          "loop": false
+        }
+      }
+    },
+    "boss": {
+      "file": "boss.png",
+      "frame_w": 128,
+      "frame_h": 128,
+      "sheet_w": 1024,
+      "sheet_h": 512,
+      "cols": 8,
+      "anims": {
+        "idle": {
+          "start": 0,
+          "count": 4,
+          "fps": 4,
+          "loop": true
+        },
+        "walk": {
+          "start": 4,
+          "count": 4,
+          "fps": 6,
+          "loop": true
+        },
+        "attack_sweep": {
+          "start": 8,
+          "count": 4,
+          "fps": 10,
+          "loop": false
+        },
+        "attack_slam": {
+          "start": 12,
+          "count": 4,
+          "fps": 8,
+          "loop": false
+        },
+        "attack_cast": {
+          "start": 16,
+          "count": 4,
+          "fps": 8,
+          "loop": false
+        },
+        "hurt": {
+          "start": 20,
+          "count": 2,
+          "fps": 8,
+          "loop": false
+        },
+        "death": {
+          "start": 22,
+          "count": 6,
+          "fps": 5,
+          "loop": false
+        }
+      }
+    },
+    "fireball": {
+      "file": "fireball.png",
+      "frame_w": 64,
+      "frame_h": 64,
+      "sheet_w": 128,
+      "sheet_h": 128,
+      "cols": 2,
+      "anims": {
+        "spin": {
+          "start": 0,
+          "count": 4,
+          "fps": 12,
+          "loop": true
+        }
+      }
+    },
+    "ui_icons": {
+      "file": "ui_icons.png",
+      "frame_w": 32,
+      "frame_h": 32,
+      "sheet_w": 128,
+      "sheet_h": 64,
+      "cols": 4,
+      "icons": {
+        "A": 0,
+        "B": 1,
+        "X": 2,
+        "Y": 3,
+        "L": 4,
+        "R": 5
+      }
+    },
+    "bar_health": {
+      "file": "bar_health.png",
+      "frame_w": 256,
+      "frame_h": 16,
+      "sheet_w": 256,
+      "sheet_h": 16,
+      "cols": 1
+    },
+    "bar_stamina": {
+      "file": "bar_stamina.png",
+      "frame_w": 256,
+      "frame_h": 16,
+      "sheet_w": 256,
+      "sheet_h": 16,
+      "cols": 1
+    },
+    "bar_boss": {
+      "file": "bar_boss.png",
+      "frame_w": 512,
+      "frame_h": 16,
+      "sheet_w": 512,
+      "sheet_h": 16,
+      "cols": 1
+    }
+  },
+  "backgrounds": {
+    "sky": {
+      "file": "sky.png",
+      "w": 512,
+      "h": 256
+    },
+    "sky_boss": {
+      "file": "sky_boss.png",
+      "w": 512,
+      "h": 256
+    },
+    "layer_far": {
+      "file": "layer_far.png",
+      "w": 1024,
+      "h": 256,
+      "tile_x": true
+    },
+    "layer_mid": {
+      "file": "layer_mid.png",
+      "w": 1024,
+      "h": 256,
+      "tile_x": true
+    },
+    "ground": {
+      "file": "ground.png",
+      "w": 128,
+      "h": 64,
+      "tile_x": true
+    },
+    "gate": {
+      "file": "gate.png",
+      "w": 128,
+      "h": 256
+    }
+  }
+}

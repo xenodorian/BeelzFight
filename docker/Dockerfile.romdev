@@ -1,0 +1,249 @@
+# docker/Dockerfile.romdev
+#
+# Reproducible "romdev" environment for BeelzFight (Sega Dreamcast homebrew).
+#
+# Produces an image with: sh-elf-gcc + arm-eabi-gcc cross toolchains, a
+# freshly built KallistiOS (KOS) (libkallisti + PC-side utils: pvrtex,
+# kmgenc, scramble, makeip, bin2c, bin2o, genromfs, elf2bin, kos-cc/...),
+# kos-ports basics (zlib, libpng), mkdcdisc (modern ELF -> bootable .cdi/.gdi
+# packager), and genisoimage/mkisofs as a manual ISO9660 fallback.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IMAGE IS BUILT THE WAY IT IS (read before changing the base image)
+# ---------------------------------------------------------------------------
+# KallistiOS's own toolchain builder (utils/kos-chain, formerly `dc-chain`)
+# builds sh-elf/arm-eabi GCC+Binutils+Newlib entirely from upstream source,
+# and is the officially recommended approach as of 2026. That was the first
+# thing tried here. It does not work in *this particular build environment*:
+# this sandbox's egress policy allows git/https to github.com, gitlab.com,
+# npm/PyPI/crates.io/Go-proxy, Ubuntu's package archive (archive.ubuntu.com),
+# and a small set of container registries (mcr.microsoft.com, gcr.io,
+# mirror.gcr.io) -- but it hard-denies (403, policy) essentially every host
+# that GNU toolchain sources are normally fetched from: ftpmirror.gnu.org,
+# mirrors.kernel.org, ftp.gnu.org, gcc.gnu.org, sourceware.org, and even
+# Docker Hub's own blob CDN (production.cloudfront.docker.com), so neither
+# `docker.io/debian`, `docker.io/library/gcc`, nor a docker.io-hosted
+# prebuilt KOS toolchain image can be pulled directly either. See docker/
+# README.md ("Toolchain provenance") for the full list of what was tried.
+#
+# The one avenue that *is* open: `mirror.gcr.io`, Google's public read-through
+# cache of the entirety of Docker Hub, which is reachable here even though
+# Docker Hub's own registry/CDN is not. Through it we pull the only
+# actively-discoverable prebuilt KOS cross-toolchain image,
+# einsteinx2/dcdev-kos-toolchain (GCC 9.3.0 for sh-elf / GCC 8.4.0 for
+# arm-eabi, built ~2020-2021, Alpine/musl-linked) -- stale, but it is a real,
+# working sh4-elf-gcc, which is otherwise unobtainable from inside this
+# sandbox. Everything *above* the raw cross-compiler -- KallistiOS itself,
+# kos-ports, mkdcdisc -- is still built fresh from pinned upstream source
+# here (all reachable via github.com/gitlab.com), so the parts of the SDK
+# that change often (KOS, the disc-packaging tooling) stay current; only the
+# GCC/Binutils/Newlib layer itself is the older prebuilt one.
+#
+# Rebuilding this Dockerfile somewhere with normal Docker Hub / GNU-mirror
+# access should instead build the toolchain from source via kos-chain (see
+# the git history of this file for that version) for a fully current,
+# reproducible-from-source toolchain -- that is the better approach and
+# should be preferred wherever the network allows it.
+#
+# The prebuilt toolchain is musl-linked (Alpine); the rest of this image is
+# Ubuntu (glibc), chosen because Ubuntu's own package archive
+# (archive.ubuntu.com) is reachable here while Debian's (deb.debian.org) is
+# not. Ubuntu's `musl` package provides just enough of a musl runtime
+# (loader + search path) for the copied cross-compiler binaries to run
+# alongside glibc tooling in the same image; see the COPY/RUN steps below.
+#
+# Build:
+#   docker build -t beelzfight-romdev -f docker/Dockerfile.romdev docker/
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Stage "toolchain": source of the prebuilt sh-elf / arm-eabi cross-compilers
+# and the musl runtime libraries their C++-implemented components (cc1,
+# cc1plus, lto1) need at runtime. Nothing from this stage's own KOS/kos-ports
+# checkout is used -- those are cloned fresh at pinned commits below instead.
+# ---------------------------------------------------------------------------
+FROM mirror.gcr.io/einsteinx2/dcdev-kos-toolchain:gcc-9 AS toolchain
+
+# ---------------------------------------------------------------------------
+# Stage "romdev": the actual image.
+# ---------------------------------------------------------------------------
+FROM mirror.gcr.io/library/ubuntu:24.04 AS romdev
+
+LABEL org.opencontainers.image.title="beelzfight-romdev" \
+      org.opencontainers.image.description="Sega Dreamcast homebrew SDK (KallistiOS) romdev environment for BeelzFight" \
+      org.opencontainers.image.source="https://github.com/KallistiOS/KallistiOS"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# ---------------------------------------------------------------------------
+# Host build/runtime dependencies.
+#
+# - musl: provides the musl dynamic loader (/lib/ld-musl-x86_64.so.1) and its
+#   default library search path (/usr/lib/x86_64-linux-musl) so the
+#   musl-linked cross-compiler binaries copied in below can execute inside
+#   this otherwise-glibc (Ubuntu) image.
+# - build-essential/pkg-config: host compiler, needed to build KOS's PC-side
+#   utils (pvrtex, kmgenc, scramble, makeip -- all compiled with the HOST
+#   compiler, not the cross one) and mkdcdisc.
+# - libjpeg-dev/libpng-dev/libelf-dev/zlib1g-dev: pvrtex/kmgenc/makeip link
+#   against these.
+# - meson/ninja-build/libisofs-dev: build mkdcdisc.
+# - genisoimage: provides genisoimage + mkisofs, the manual ISO9660 fallback.
+# - file: used to validate the produced SH4 ELF binaries.
+# - python3: used by kos-ports' build system (distfile validation).
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        curl \
+        musl \
+        build-essential \
+        pkg-config \
+        libjpeg-dev \
+        libpng-dev \
+        libelf-dev \
+        zlib1g-dev \
+        meson \
+        ninja-build \
+        libisofs-dev \
+        genisoimage \
+        file \
+        python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Pinned source revisions (reproducibility). Update these to move to a newer
+# KOS/kos-ports/mkdcdisc revision. Pinned as of 2026-09-11 research for this
+# image (mkdcdisc from https://gitlab.com/simulant/mkdcdisc).
+# ---------------------------------------------------------------------------
+ARG KOS_COMMIT=caf8fbfa8464af5701e000b47c2bb910055a3206
+ARG KOS_PORTS_COMMIT=f4faacc42faaf552625777b7709e871a827e1055
+ARG MKDCDISC_COMMIT=4d74e40dd2122e14389a305ed1d86dd024201389
+
+# ---------------------------------------------------------------------------
+# Standard KallistiOS toolchain directory layout (matches the defaults baked
+# into doc/environ.sh.sample, so it can be copied in verbatim below).
+#   /opt/toolchains/dc/kos       KOS_BASE
+#   /opt/toolchains/dc/kos-ports KOS_PORTS
+#   /opt/toolchains/dc/sh-elf    KOS_CC_BASE   (sh-elf-gcc, ...)
+#   /opt/toolchains/dc/arm-eabi  DC_ARM_BASE   (arm-eabi-gcc, ...)
+#   /opt/toolchains/dc/bin       DC_TOOLS_BASE (pvrtex, kmgenc, scramble, ...)
+# ---------------------------------------------------------------------------
+ENV KOS_BASE=/opt/toolchains/dc/kos \
+    KOS_PORTS=/opt/toolchains/dc/kos-ports \
+    KOS_CC_BASE=/opt/toolchains/dc/sh-elf \
+    DC_ARM_BASE=/opt/toolchains/dc/arm-eabi \
+    DC_TOOLS_BASE=/opt/toolchains/dc/bin
+
+# Convenience additions to PATH: the cross-compiler bin dirs and the PC-side
+# tool install dir. (kos-cc/kos-cmake/etc are added to PATH by environ.sh's
+# own logic, at $KOS_BASE/utils/build_wrappers, once it is sourced.)
+ENV PATH="${KOS_CC_BASE}/bin:${DC_ARM_BASE}/bin:${DC_TOOLS_BASE}:${PATH}"
+
+RUN mkdir -p /opt/toolchains/dc "${DC_TOOLS_BASE}"
+
+# ---------------------------------------------------------------------------
+# Bring in the prebuilt sh-elf + arm-eabi cross toolchains, plus the two
+# musl-built runtime shared libraries their C++-implemented pieces need
+# (cc1/cc1plus/lto1 are themselves implemented in C++). Placed directly in
+# musl's default search directory (/usr/lib/x86_64-linux-musl, already
+# listed in /etc/ld-musl-x86_64.path once the `musl` package is installed)
+# so the musl loader finds them with no extra configuration -- and, being
+# musl's own search path rather than glibc's, this cannot shadow or break
+# any glibc (Ubuntu-native) binary in this image.
+# ---------------------------------------------------------------------------
+COPY --from=toolchain /opt/toolchains/dc/sh-elf /opt/toolchains/dc/sh-elf
+COPY --from=toolchain /opt/toolchains/dc/arm-eabi /opt/toolchains/dc/arm-eabi
+COPY --from=toolchain /usr/lib/libstdc++.so.6.0.28 /usr/lib/x86_64-linux-musl/libstdc++.so.6.0.28
+COPY --from=toolchain /usr/lib/libgcc_s.so.1 /usr/lib/x86_64-linux-musl/libgcc_s.so.1
+RUN ln -s libstdc++.so.6.0.28 /usr/lib/x86_64-linux-musl/libstdc++.so.6 \
+    && sh-elf-gcc --version \
+    && arm-eabi-gcc --version \
+    && echo 'int main(void){return 0;}' > /tmp/smoke.c \
+    && sh-elf-gcc -c /tmp/smoke.c -o /tmp/smoke.o \
+    && file /tmp/smoke.o \
+    && rm -f /tmp/smoke.c /tmp/smoke.o
+
+# ---------------------------------------------------------------------------
+# Fetch KallistiOS + kos-ports at the pinned commits (fetch-by-SHA keeps the
+# clone shallow/fast while guaranteeing an exact, reproducible revision even
+# if upstream's default branch moves on between image rebuilds).
+# ---------------------------------------------------------------------------
+RUN git init -q "${KOS_BASE}" \
+    && git -C "${KOS_BASE}" remote add origin https://github.com/KallistiOS/KallistiOS \
+    && git -C "${KOS_BASE}" fetch --depth 1 origin "${KOS_COMMIT}" \
+    && git -C "${KOS_BASE}" checkout -q FETCH_HEAD \
+    && echo "${KOS_COMMIT}" > /opt/toolchains/dc/KOS_COMMIT.txt
+
+RUN git init -q "${KOS_PORTS}" \
+    && git -C "${KOS_PORTS}" remote add origin https://github.com/KallistiOS/kos-ports \
+    && git -C "${KOS_PORTS}" fetch --depth 1 origin "${KOS_PORTS_COMMIT}" \
+    && git -C "${KOS_PORTS}" checkout -q FETCH_HEAD \
+    && echo "${KOS_PORTS_COMMIT}" > /opt/toolchains/dc/KOS_PORTS_COMMIT.txt
+
+# ---------------------------------------------------------------------------
+# Build KallistiOS itself: libkallisti (kernel + addons, cross-compiled with
+# the sh-elf toolchain via the kos-cc wrapper) and all PC-side utils (built
+# with the host compiler), including pvrtex and kmgenc (PNG -> PVR texture
+# converters), scramble, makeip, bin2c, bin2o, genromfs, elf2bin.
+# ---------------------------------------------------------------------------
+RUN cp "${KOS_BASE}/doc/environ.sh.sample" "${KOS_BASE}/environ.sh" \
+    && bash -lc "source ${KOS_BASE}/environ.sh && cd ${KOS_BASE} && make -j\$(nproc)"
+
+# Install/collect the PC-side tools onto DC_TOOLS_BASE (already on PATH via
+# environ.sh) so they're directly invocable without cd'ing into utils/*.
+RUN bash -lc "source ${KOS_BASE}/environ.sh \
+    && make -C \${KOS_BASE}/utils/pvrtex install \
+    && make -C \${KOS_BASE}/utils/makeip install \
+    && cp \${KOS_BASE}/utils/kmgenc/kmgenc      \${DC_TOOLS_BASE}/ \
+    && cp \${KOS_BASE}/utils/makeip/makeip      \${DC_TOOLS_BASE}/ \
+    && cp \${KOS_BASE}/utils/scramble/scramble  \${DC_TOOLS_BASE}/ \
+    && cp \${KOS_BASE}/utils/bin2c/bin2c        \${DC_TOOLS_BASE}/ \
+    && cp \${KOS_BASE}/utils/bin2o/bin2o        \${DC_TOOLS_BASE}/ \
+    && cp \${KOS_BASE}/utils/genromfs/genromfs  \${DC_TOOLS_BASE}/ \
+    && cp \${KOS_BASE}/utils/elf2bin/elf2bin    \${DC_TOOLS_BASE}/ \
+    && chmod +x \${DC_TOOLS_BASE}/*"
+
+# ---------------------------------------------------------------------------
+# kos-ports basics. The PVR 2D API used for sprite rendering is part of core
+# KOS (no port needed), but zlib/libpng are foundational dependencies used
+# throughout kos-ports and are cheap to build up front.
+# ---------------------------------------------------------------------------
+RUN bash -lc "source ${KOS_BASE}/environ.sh \
+    && cd \${KOS_PORTS}/zlib   && make install clean \
+    && cd \${KOS_PORTS}/libpng && make install clean"
+
+# ---------------------------------------------------------------------------
+# mkdcdisc: Simulant's modern successor to scramble+makeip+img4dc. One
+# command turns an ELF (+ optional data dir) straight into a bootable
+# .cdi/.gdi/.mds/.nrg, computing IP.BIN/ECC/padding for you. This is the
+# tool documented as "the current recommended way" to package a Dreamcast
+# disc image as of 2026; genisoimage above remains available as a manual
+# fallback for projects that want to build their own ISO9660 tree instead.
+# ---------------------------------------------------------------------------
+RUN git init -q /opt/src/mkdcdisc \
+    && git -C /opt/src/mkdcdisc remote add origin https://gitlab.com/simulant/mkdcdisc \
+    && git -C /opt/src/mkdcdisc fetch --depth 1 origin "${MKDCDISC_COMMIT}" \
+    && git -C /opt/src/mkdcdisc checkout -q FETCH_HEAD \
+    && cd /opt/src/mkdcdisc \
+    && meson setup builddir -Dpng=enabled \
+    && meson compile -C builddir \
+    && meson install -C builddir \
+    && echo "${MKDCDISC_COMMIT}" > /opt/toolchains/dc/MKDCDISC_COMMIT.txt \
+    && rm -rf /opt/src/mkdcdisc \
+    && ldconfig
+
+# Canonical path used throughout the upstream KOS docs/scene, plus a
+# `/opt/kos` convenience alias (some external docs/snippets assume this).
+RUN ln -s /opt/toolchains/dc/kos /opt/kos
+
+# Source environ.sh automatically in interactive/login shells for convenience.
+RUN echo '[ -f /opt/toolchains/dc/kos/environ.sh ] && . /opt/toolchains/dc/kos/environ.sh' \
+        > /etc/profile.d/kos-environ.sh \
+    && echo '[ -f /opt/toolchains/dc/kos/environ.sh ] && . /opt/toolchains/dc/kos/environ.sh' \
+        >> /etc/bash.bashrc
+
+WORKDIR /src
+CMD ["/bin/bash"]
