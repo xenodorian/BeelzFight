@@ -98,6 +98,30 @@ void draw_sprite(const bz_texture_t *tex, int frame, float x, float y, float w, 
     draw_tint_sprite(tex, frame, x, y, w, h, flip_x, alpha_mul, 1.0f, 1.0f, 1.0f);
 }
 
+void draw_actor_tint(const bz_texture_t *tex, int frame, float x, float y,
+                      int flip_x, float alpha_mul, float r, float g, float b) {
+    if (!tex->ptr || tex->frame_w <= 0 || tex->frame_h <= 0) return;
+    float kx = tex->draw_w / (float)tex->frame_w;
+    float ky = tex->draw_h / (float)tex->frame_h;
+    /* Mirroring happens in UV space, so the quad itself never moves; the
+     * anchor therefore has to be mirrored within the frame too, otherwise
+     * turning around shifts the actor by (frame_w - 2*anchor_x) pixels. */
+    float ax = flip_x ? ((float)tex->frame_w - tex->anchor_x) : tex->anchor_x;
+    draw_tint_sprite(tex, frame, x - ax * kx, y - tex->anchor_y * ky,
+                      tex->draw_w, tex->draw_h, flip_x, alpha_mul, r, g, b);
+}
+
+void draw_actor(const bz_texture_t *tex, int frame, float x, float y,
+                 int flip_x, float alpha_mul) {
+    draw_actor_tint(tex, frame, x, y, flip_x, alpha_mul, 1.0f, 1.0f, 1.0f);
+}
+
+void draw_shadow(const bz_texture_t *tex, float x, float y, float w, float alpha_mul) {
+    if (!tex->ptr || tex->frame_w <= 0) return;
+    float h = w * (float)tex->frame_h / (float)tex->frame_w;
+    draw_sprite(tex, 0, x - w * 0.5f, y - h * 0.5f, w, h, 0, alpha_mul);
+}
+
 /* Draws a horizontally-tiling background layer wide enough to cover the
  * screen for any scroll_x, using UV > 1.0 wrap (textures are POT so PVR
  * wraps cleanly) instead of manually stamping multiple quads. */
@@ -269,6 +293,16 @@ void draw_text_slot(int slot, const char *str, float x, float y, float scale) {
     float u1 = (float)s->bufw / (float)s->pot_w;
     float v1 = (float)TXT_CHAR_H / (float)s->pot_h;
     submit_quad(&s->hdr, x, y, x + s->bufw * scale, y + TXT_CHAR_H * scale, 0, 0, u1, v1, 0xFFFFFFFF);
+}
+
+float text_width(const char *str, float scale) {
+    int n = (int)strlen(str);
+    if (n > TXT_MAX_CHARS) n = TXT_MAX_CHARS;
+    return n * (float)TXT_CHAR_PX * scale;
+}
+
+void draw_text_centered(int slot, const char *str, float cx, float y, float scale) {
+    draw_text_slot(slot, str, cx - text_width(str, scale) * 0.5f, y, scale);
 }
 
 void draw_text(const char *str, float x, float y, float scale) {

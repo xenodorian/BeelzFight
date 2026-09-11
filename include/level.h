@@ -7,6 +7,15 @@
 #include "boss.h"
 
 #define MAX_ENEMIES 16
+#define MAX_EMBERS  40
+
+/* Drifting ash/ember motes. Pure vertex-coloured quads (no texture, no
+ * VRAM), purely decorative -- they give the empty upper half of the screen
+ * some motion without costing anything the PVR cares about. */
+typedef struct {
+    float x, y, vx, vy, life, life_max, size;
+    uint8_t r, g, b;
+} ember_t;
 
 typedef enum {
     LV_INTRO,       /* walking toward wave 1                        */
@@ -28,6 +37,8 @@ typedef struct {
     level_phase_t phase;
     float cam_x;
     float phase_timer;
+    ember_t embers[MAX_EMBERS];
+    float ember_spawn_timer;
 } level_t;
 
 void level_init(level_t *lv);

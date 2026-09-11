@@ -1,218 +1,254 @@
 {
   "sheets": {
     "player": {
+      "sheet_w": 512,
+      "sheet_h": 1024,
+      "cols": 4,
+      "frame_w": 112,
+      "frame_h": 112,
       "file": "player.png",
-      "frame_w": 96,
-      "frame_h": 96,
-      "sheet_w": 1024,
-      "sheet_h": 512,
-      "cols": 10,
+      "anchor_x": 42.0,
+      "anchor_y": 102.0,
+      "draw_w": 166.8,
+      "draw_h": 166.8,
       "anims": {
         "idle": {
           "start": 0,
           "count": 4,
           "fps": 5,
-          "loop": true
+          "loop": 1
         },
         "run": {
           "start": 4,
           "count": 4,
-          "fps": 10,
-          "loop": true
+          "fps": 11,
+          "loop": 1
         },
         "attack1": {
           "start": 8,
           "count": 4,
           "fps": 14,
-          "loop": false
+          "loop": 0
         },
         "attack2": {
           "start": 12,
           "count": 4,
           "fps": 14,
-          "loop": false
+          "loop": 0
         },
         "attack3": {
           "start": 16,
           "count": 4,
           "fps": 16,
-          "loop": false
+          "loop": 0
         },
         "attack4": {
           "start": 20,
           "count": 5,
           "fps": 14,
-          "loop": false
+          "loop": 0
         },
         "parry": {
           "start": 25,
           "count": 2,
           "fps": 12,
-          "loop": false
+          "loop": 0
         },
         "block": {
           "start": 27,
           "count": 2,
           "fps": 6,
-          "loop": true
+          "loop": 1
         },
         "hit": {
           "start": 29,
           "count": 2,
-          "fps": 8,
-          "loop": false
+          "fps": 9,
+          "loop": 0
         },
         "death": {
           "start": 31,
           "count": 5,
           "fps": 6,
-          "loop": false
+          "loop": 0
         }
       }
     },
     "imp": {
-      "file": "imp.png",
-      "frame_w": 64,
-      "frame_h": 64,
       "sheet_w": 256,
-      "sheet_h": 256,
-      "cols": 4,
+      "sheet_h": 1024,
+      "cols": 2,
+      "frame_w": 96,
+      "frame_h": 96,
+      "file": "imp.png",
+      "anchor_x": 48.0,
+      "anchor_y": 86.0,
+      "draw_w": 82.6,
+      "draw_h": 82.6,
       "anims": {
         "idle": {
           "start": 0,
           "count": 3,
-          "fps": 4,
-          "loop": true
+          "fps": 5,
+          "loop": 1
         },
         "walk": {
           "start": 3,
           "count": 4,
-          "fps": 9,
-          "loop": true
+          "fps": 10,
+          "loop": 1
         },
         "attack": {
           "start": 7,
           "count": 3,
           "fps": 12,
-          "loop": false
+          "loop": 0
         },
         "death": {
           "start": 10,
           "count": 3,
-          "fps": 6,
-          "loop": false
+          "fps": 7,
+          "loop": 0
         }
       }
     },
     "thrall": {
-      "file": "thrall.png",
-      "frame_w": 64,
-      "frame_h": 64,
       "sheet_w": 256,
-      "sheet_h": 256,
-      "cols": 4,
+      "sheet_h": 1024,
+      "cols": 2,
+      "frame_w": 96,
+      "frame_h": 96,
+      "file": "thrall.png",
+      "anchor_x": 48.0,
+      "anchor_y": 88.0,
+      "draw_w": 98.1,
+      "draw_h": 98.1,
       "anims": {
         "idle": {
           "start": 0,
           "count": 2,
           "fps": 3,
-          "loop": true
+          "loop": 1
         },
         "walk": {
           "start": 2,
           "count": 4,
-          "fps": 8,
-          "loop": true
+          "fps": 9,
+          "loop": 1
         },
         "attack": {
           "start": 6,
           "count": 3,
           "fps": 11,
-          "loop": false
+          "loop": 0
         },
         "death": {
           "start": 9,
           "count": 3,
-          "fps": 6,
-          "loop": false
+          "fps": 7,
+          "loop": 0
         }
       }
     },
     "boss": {
+      "sheet_w": 512,
+      "sheet_h": 1024,
+      "cols": 3,
+      "frame_w": 144,
+      "frame_h": 144,
       "file": "boss.png",
-      "frame_w": 128,
-      "frame_h": 128,
-      "sheet_w": 1024,
-      "sheet_h": 512,
-      "cols": 8,
+      "anchor_x": 72.0,
+      "anchor_y": 134.0,
+      "draw_w": 266.2,
+      "draw_h": 266.2,
       "anims": {
         "idle": {
           "start": 0,
-          "count": 4,
-          "fps": 4,
-          "loop": true
+          "count": 3,
+          "fps": 5,
+          "loop": 1
         },
         "walk": {
-          "start": 4,
-          "count": 4,
-          "fps": 6,
-          "loop": true
+          "start": 3,
+          "count": 3,
+          "fps": 7,
+          "loop": 1
         },
         "attack_sweep": {
-          "start": 8,
-          "count": 4,
+          "start": 6,
+          "count": 3,
           "fps": 10,
-          "loop": false
+          "loop": 0
         },
         "attack_slam": {
-          "start": 12,
-          "count": 4,
-          "fps": 8,
-          "loop": false
+          "start": 9,
+          "count": 3,
+          "fps": 9,
+          "loop": 0
         },
         "attack_cast": {
-          "start": 16,
-          "count": 4,
-          "fps": 8,
-          "loop": false
-        },
-        "hurt": {
-          "start": 20,
+          "start": 12,
           "count": 2,
           "fps": 8,
-          "loop": false
+          "loop": 0
+        },
+        "hurt": {
+          "start": 14,
+          "count": 2,
+          "fps": 9,
+          "loop": 0
         },
         "death": {
-          "start": 22,
-          "count": 6,
+          "start": 16,
+          "count": 4,
           "fps": 5,
-          "loop": false
+          "loop": 0
         }
       }
     },
     "fireball": {
+      "sheet_w": 64,
+      "sheet_h": 512,
+      "cols": 1,
+      "frame_w": 48,
+      "frame_h": 48,
       "file": "fireball.png",
-      "frame_w": 64,
-      "frame_h": 64,
-      "sheet_w": 128,
-      "sheet_h": 128,
-      "cols": 2,
+      "anchor_x": 24.0,
+      "anchor_y": 24.0,
+      "draw_w": 47.6,
+      "draw_h": 47.6,
       "anims": {
         "spin": {
           "start": 0,
-          "count": 4,
-          "fps": 12,
-          "loop": true
+          "count": 6,
+          "fps": 14,
+          "loop": 1
         }
       }
     },
-    "ui_icons": {
-      "file": "ui_icons.png",
-      "frame_w": 32,
+    "shadow": {
+      "file": "shadow.png",
+      "frame_w": 64,
       "frame_h": 32,
-      "sheet_w": 128,
-      "sheet_h": 64,
-      "cols": 4,
+      "sheet_w": 64,
+      "sheet_h": 32,
+      "cols": 1,
+      "anchor_x": 32.0,
+      "anchor_y": 16.0,
+      "draw_w": 64,
+      "draw_h": 32
+    },
+    "ui_icons": {
+      "sheet_w": 64,
+      "sheet_h": 256,
+      "cols": 1,
+      "frame_w": 40,
+      "frame_h": 40,
+      "file": "ui_icons.png",
+      "anchor_x": 20.0,
+      "anchor_y": 20.0,
+      "draw_w": 40.0,
+      "draw_h": 40.0,
       "icons": {
         "A": 0,
         "B": 1,
@@ -221,60 +257,38 @@
         "L": 4,
         "R": 5
       }
-    },
-    "bar_health": {
-      "file": "bar_health.png",
-      "frame_w": 256,
-      "frame_h": 16,
-      "sheet_w": 256,
-      "sheet_h": 16,
-      "cols": 1
-    },
-    "bar_stamina": {
-      "file": "bar_stamina.png",
-      "frame_w": 256,
-      "frame_h": 16,
-      "sheet_w": 256,
-      "sheet_h": 16,
-      "cols": 1
-    },
-    "bar_boss": {
-      "file": "bar_boss.png",
-      "frame_w": 512,
-      "frame_h": 16,
-      "sheet_w": 512,
-      "sheet_h": 16,
-      "cols": 1
     }
   },
   "backgrounds": {
     "sky": {
       "file": "sky.png",
-      "w": 512,
-      "h": 256
+      "w": 64,
+      "h": 256,
+      "opaque": 1
     },
     "sky_boss": {
       "file": "sky_boss.png",
-      "w": 512,
-      "h": 256
+      "w": 64,
+      "h": 256,
+      "opaque": 1
     },
     "layer_far": {
       "file": "layer_far.png",
       "w": 1024,
       "h": 256,
-      "tile_x": true
+      "tile_x": 1
     },
     "layer_mid": {
       "file": "layer_mid.png",
       "w": 1024,
       "h": 256,
-      "tile_x": true
+      "tile_x": 1
     },
     "ground": {
       "file": "ground.png",
-      "w": 128,
-      "h": 64,
-      "tile_x": true
+      "w": 256,
+      "h": 128,
+      "tile_x": 1
     },
     "gate": {
       "file": "gate.png",

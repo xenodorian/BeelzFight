@@ -9,18 +9,47 @@ KOS_INIT_FLAGS(INIT_DEFAULT);
 
 typedef enum { GS_TITLE, GS_PLAY } game_state_t;
 
-static void draw_title_screen(void) {
+/* The title screen reuses the in-game parallax stack rather than being a
+ * flat colour: same layers, same order, just parked at a fixed scroll. */
+static void draw_title_screen(float t) {
     render_frame_begin();
 
     render_bg_list_begin();
-    draw_bg_scroll(&g_assets.bg_sky_boss, 0.0f, 0.0f, SCREEN_W, SCREEN_H);
+    draw_bg_scroll(&g_assets.bg_sky_boss, 0.0f, 0.0f, SCREEN_W, SKY_H);
     render_bg_list_end();
 
     render_sprite_list_begin();
-    draw_quad(SCREEN_W * 0.5f - 180.0f, 120.0f, 360.0f, 70.0f, 15, 8, 14, 210);
-    draw_text_slot(4, "B E E L Z F I G H T", SCREEN_W * 0.5f - 156.0f, 140.0f, 1.6f);
-    draw_text_slot(5, "PRESS START", SCREEN_W * 0.5f - 66.0f, 320.0f, 1.2f);
-    draw_text_slot(6, "A/B/X/Y ATTACK  L PARRY  R BLOCK", SCREEN_W * 0.5f - 190.0f, 360.0f, 1.0f);
+    float drift = t * 6.0f;
+    draw_bg_scroll(&g_assets.bg_layer_far, 120.0f + drift * 0.35f, FAR_Y, SCREEN_W, FAR_H);
+    draw_bg_scroll(&g_assets.bg_layer_mid, 400.0f + drift, MID_Y, SCREEN_W, MID_H);
+    draw_bg_scroll(&g_assets.bg_ground, drift * 1.8f, GROUND_TOP, SCREEN_W, GROUND_H);
+
+    /* she stands on the title screen, idling, facing the camera-left menu */
+    /* left of centre, so the prompt panel on the right never covers her */
+    const float hero_x = 180.0f;
+    draw_shadow(&g_assets.shadow, hero_x, GROUND_Y - 2.0f, 58.0f, 0.85f);
+    int idle_frame = PLAYER_ANIM_IDLE.start +
+                     ((int)(t * PLAYER_ANIM_IDLE.fps) % PLAYER_ANIM_IDLE.count);
+    draw_actor(&g_assets.player, idle_frame, hero_x, GROUND_Y, 0, 1.0f);
+
+    const char *title = "BEELZFIGHT";
+    /* bfont draws at most TXT_MAX_CHARS (32); the old legend string was 34
+     * and lost its tail, and the title's hand-picked x overran its plate. */
+    const char *legend = "ABXY ATTACK  L PARRY  R BLOCK";
+    float tw = text_width(title, 2.4f);
+    draw_quad(SCREEN_W * 0.5f - tw * 0.5f - 26.0f, 58.0f, tw + 52.0f, 76.0f, 12, 6, 12, 200);
+    draw_quad(SCREEN_W * 0.5f - tw * 0.5f - 26.0f, 58.0f, tw + 52.0f, 3.0f, 214, 62, 72, 235);
+    draw_quad(SCREEN_W * 0.5f - tw * 0.5f - 26.0f, 131.0f, tw + 52.0f, 3.0f, 214, 62, 72, 235);
+    draw_text_centered(4, title, SCREEN_W * 0.5f, 72.0f, 2.4f);
+
+    /* right-hand panel, well inside SAFE_BOTTOM: at the foot of the screen
+     * the bottom line was being eaten by the emulator's scanline crop */
+    const float px = 412.0f;
+    draw_quad(px - 190.0f, 288.0f, 380.0f, 96.0f, 10, 5, 10, 195);
+    draw_quad(px - 190.0f, 288.0f, 380.0f, 2.0f, 214, 62, 72, 210);
+    draw_quad(px - 190.0f, 382.0f, 380.0f, 2.0f, 214, 62, 72, 210);
+    draw_text_centered(5, "PRESS START", px, 300.0f, 1.4f);
+    draw_text_centered(6, legend, px, 344.0f, 1.0f);
     render_sprite_list_end();
 
     render_frame_end();
@@ -47,6 +76,7 @@ int main(int argc, char **argv) {
     input.ltrig = input.rtrig = input.joyx = input.joyy = 0;
 
     uint64_t last_ms = timer_ms_gettime64();
+    float title_t = 0.0f;
 
     while (1) {
         input_update(&input);
@@ -61,7 +91,8 @@ int main(int argc, char **argv) {
                 level_init(&level);
                 gs = GS_PLAY;
             }
-            draw_title_screen();
+            title_t += dt;
+            draw_title_screen(title_t);
         } else {
             level_update(&level, &input, dt);
             if ((level.phase == LV_WIN || level.phase == LV_LOSE) &&

@@ -9,9 +9,7 @@ void assets_load(void) {
     texture_load_sheet(&g_assets.boss, &SHEET_BOSS);
     texture_load_sheet(&g_assets.fireball, &SHEET_FIREBALL);
     texture_load_sheet(&g_assets.ui_icons, &SHEET_UI_ICONS);
-    texture_load_sheet(&g_assets.bar_health, &SHEET_BAR_HEALTH);
-    texture_load_sheet(&g_assets.bar_stamina, &SHEET_BAR_STAMINA);
-    texture_load_sheet(&g_assets.bar_boss, &SHEET_BAR_BOSS);
+    texture_load_sheet(&g_assets.shadow, &SHEET_SHADOW);
 
     texture_load_bg(&g_assets.bg_sky, &BG_SKY);
     texture_load_bg(&g_assets.bg_sky_boss, &BG_SKY_BOSS);

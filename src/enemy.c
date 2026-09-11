@@ -22,6 +22,13 @@ static void ensure_defs(void) {
         &g_assets.thrall, &THRALL_ANIM_IDLE, &THRALL_ANIM_WALK, &THRALL_ANIM_ATTACK, &THRALL_ANIM_DEATH,
         32.0f, 55.0f, 50.0f, 10.0f, 1.3f, THRALL_DISPLAY, 0.55f
     };
+#ifdef BEELZ_QA
+    /* Visual-QA builds: one-hit kills so scripted input actually clears the
+     * waves and reaches the boss arena, which is the part that still has to
+     * be looked at in the emulator. Never defined for the shipped disc. */
+    g_defs[EK_IMP].health = 1.0f;
+    g_defs[EK_THRALL].health = 1.0f;
+#endif
     g_defs_ready = 1;
 }
 
@@ -109,12 +116,20 @@ void enemy_update(enemy_t *e, player_t *player, float dt) {
 void enemy_draw(const enemy_t *e, float cam_x) {
     if (!e->slot_used) return;
     const enemy_def_t *d = &g_defs[e->kind];
-    float sx = e->x - cam_x - d->display * 0.5f;
-    float sy = e->y - d->display;
     int flip = (e->facing < 0);
-    float alpha = 1.0f;
-    if (e->hit_flash > 0.0f) alpha = 0.5f;
-    draw_sprite(d->tex, anim_frame(&e->anim), sx, sy, d->display, d->display, flip, alpha);
+    /* Hit feedback is a white flash rather than a fade: at 50% alpha over a
+     * busy background the sprite mostly just disappeared. */
+    if (e->hit_flash > 0.0f)
+        draw_actor_tint(d->tex, anim_frame(&e->anim), e->x - cam_x, e->y, flip,
+                         1.0f, 1.0f, 0.55f, 0.55f);
+    else
+        draw_actor(d->tex, anim_frame(&e->anim), e->x - cam_x, e->y, flip, 1.0f);
+}
+
+void enemy_draw_shadow(const enemy_t *e, float cam_x) {
+    if (!e->slot_used || e->state == ES_DEAD) return;
+    const enemy_def_t *d = &g_defs[e->kind];
+    draw_shadow(&g_assets.shadow, e->x - cam_x, e->y - 2.0f, d->display * 0.62f, 0.8f);
 }
 
 int enemy_aabb(const enemy_t *e, float *x, float *y, float *w, float *h) {

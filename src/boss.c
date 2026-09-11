@@ -103,6 +103,8 @@ void boss_update(boss_t *b, player_t *player, float dt) {
         }
         if (dist > MELEE_RANGE * 0.7f) {
             b->x += (dx < 0 ? -1.0f : 1.0f) * BOSS_SPEED * (b->phase2 ? 1.3f : 1.0f) * dt;
+            /* keep the whole 266px-wide sprite inside the arena view */
+            b->x = bz_clampf(b->x, ARENA_GATE_X + 90.0f, ARENA_MAX_BOSS_X);
             if (b->state != BS_WALK) enter_state(b, BS_WALK, &BOSS_ANIM_WALK);
         } else if (b->state != BS_IDLE) {
             enter_state(b, BS_IDLE, &BOSS_ANIM_IDLE);
@@ -156,17 +158,15 @@ void boss_update(boss_t *b, player_t *player, float dt) {
 
 void boss_draw(const boss_t *b, float cam_x) {
     if (!b->active) return;
-    float sx = b->x - cam_x - BOSS_DISPLAY * 0.5f;
-    float sy = b->y - BOSS_DISPLAY;
     int flip = (b->facing < 0);
-    draw_sprite(&g_assets.boss, anim_frame(&b->anim), sx, sy, BOSS_DISPLAY, BOSS_DISPLAY, flip, 1.0f);
+    draw_shadow(&g_assets.shadow, b->x - cam_x, b->y - 2.0f, 150.0f, 0.85f);
+    draw_actor(&g_assets.boss, anim_frame(&b->anim), b->x - cam_x, b->y, flip, 1.0f);
 
     for (int i = 0; i < MAX_FIREBALLS; i++) {
         const fireball_t *f = &b->fireballs[i];
         if (!f->active) continue;
-        draw_sprite(&g_assets.fireball, anim_frame(&f->anim),
-                    f->x - cam_x - FIREBALL_DISPLAY * 0.5f, f->y - FIREBALL_DISPLAY * 0.5f,
-                    FIREBALL_DISPLAY, FIREBALL_DISPLAY, 0, 1.0f);
+        draw_actor(&g_assets.fireball, anim_frame(&f->anim),
+                   f->x - cam_x, f->y, 0, 1.0f);
     }
 }
 

@@ -38,6 +38,7 @@ typedef struct {
 void player_init(player_t *p, const bz_texture_t *tex, float x, float y);
 void player_update(player_t *p, const bz_input_t *in, float dt);
 void player_draw(const player_t *p, float cam_x);
+void player_draw_shadow(const player_t *p, float cam_x);
 
 /* Active melee hitbox for this frame, world space. Returns 0 if no attack
  * is currently active. */

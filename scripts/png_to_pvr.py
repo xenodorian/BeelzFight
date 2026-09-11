@@ -5,8 +5,12 @@ PowerVR2 GPU's non-twiddled 16-bit texture formats directly. This avoids any
 dependency on KOS's bundled kmgenc/pvrtex tool -- both formats below are
 exactly what PVR hardware consumes, just written out by hand:
 
-  ARGB4444 (has alpha): used for all sprite sheets, UI, bars.
-  RGB565   (opaque):    used for background layers (saves VRAM/bandwidth).
+  ARGB4444 (has alpha): sprite sheets, UI, and the parallax/ground layers,
+                        which are cut-out silhouettes with transparent sky
+                        showing through them.
+  RGB565   (opaque):    fully-opaque layers only (the sky gradients), which
+                        halves nothing in size but does let them render in
+                        the cheap opaque list.
 
 File layout ("BPVR" custom container, parsed by src/texture.c):
   char[4]  magic "BPVR"
@@ -49,8 +53,18 @@ def to_rgb565(im):
     return v.astype("<u2").tobytes()
 
 
-def convert(src_png, dst_name, fmt):
+def pick_format(im):
+    """ARGB4444 unless the image is genuinely opaque everywhere."""
+    if im.mode not in ("RGBA", "LA", "PA") and "transparency" not in im.info:
+        return FMT_RGB565
+    a = np.asarray(im.convert("RGBA"))[..., 3]
+    return FMT_RGB565 if a.min() == 255 else FMT_ARGB4444
+
+
+def convert(src_png, dst_name, fmt=None):
     im = Image.open(src_png)
+    if fmt is None:
+        fmt = pick_format(im)
     w, h = im.size
     assert (w & (w - 1)) == 0 and (h & (h - 1)) == 0, f"{src_png} not power-of-two ({w}x{h})"
     data = to_argb4444(im) if fmt == FMT_ARGB4444 else to_rgb565(im)
@@ -64,15 +78,13 @@ def convert(src_png, dst_name, fmt):
 
 
 def main():
-    sprite_files = [f for f in os.listdir(SPR_DIR) if f.endswith(".png")]
-    for f in sprite_files:
-        name = os.path.splitext(f)[0] + ".pvr"
-        convert(os.path.join(SPR_DIR, f), name, FMT_ARGB4444)
-
-    bg_files = [f for f in os.listdir(BG_DIR) if f.endswith(".png")]
-    for f in bg_files:
-        name = os.path.splitext(f)[0] + ".pvr"
-        convert(os.path.join(BG_DIR, f), name, FMT_RGB565)
+    # files starting with "_" are QA contact sheets, not game assets
+    sprite_files = sorted(f for f in os.listdir(SPR_DIR)
+                          if f.endswith(".png") and not f.startswith("_"))
+    bg_files = sorted(f for f in os.listdir(BG_DIR) if f.endswith(".png"))
+    for d, files in ((SPR_DIR, sprite_files), (BG_DIR, bg_files)):
+        for f in files:
+            convert(os.path.join(d, f), os.path.splitext(f)[0] + ".pvr")
 
     total = sum(os.path.getsize(os.path.join(OUT_DIR, f)) for f in os.listdir(OUT_DIR))
     print(f"\n{len(sprite_files) + len(bg_files)} textures written to romdisc/textures/ "

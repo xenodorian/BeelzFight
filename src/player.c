@@ -1,6 +1,7 @@
 #include <math.h>
 #include <string.h>
 #include "player.h"
+#include "assets.h"
 
 #define PARRY_WINDOW            0.15f   /* seconds of true parry frames at anim start */
 #define BLOCK_DRAIN_PER_SEC     40.0f
@@ -25,7 +26,15 @@ void player_init(player_t *p, const bz_texture_t *tex, float x, float y) {
     p->x = x;
     p->y = y;
     p->facing = 1;
+#ifdef BEELZ_QA
+    /* Visual-QA builds only (scripts/build_qa.sh): synthetic input can't
+     * actually play the game well enough to reach the boss arena, and the
+     * boss fight has to be looked at in the emulator like everything else.
+     * Never defined for the shipped disc. */
+    p->health_max = p->health = 100000.0f;
+#else
     p->health_max = p->health = 100.0f;
+#endif
     p->stamina_max = p->stamina = 100.0f;
     p->alive = 1;
     p->state = P_IDLE;
@@ -126,13 +135,18 @@ void player_update(player_t *p, const bz_input_t *in, float dt) {
 }
 
 void player_draw(const player_t *p, float cam_x) {
-    float sx = p->x - cam_x - PLAYER_DISPLAY * 0.5f;
-    float sy = p->y - PLAYER_DISPLAY;
     int flip = (p->facing < 0);
     float alpha = 1.0f;
     if (p->invuln_timer > 0.0f && p->state != P_DEATH)
         alpha = (fmodf(p->invuln_timer, 0.1f) > 0.05f) ? 1.0f : 0.4f;
-    draw_sprite(p->tex, anim_frame(&p->anim), sx, sy, PLAYER_DISPLAY, PLAYER_DISPLAY, flip, alpha);
+    /* (x, y) is her feet on the ground line; the sheet's own anchor and
+     * draw size do the rest (see draw_actor). */
+    draw_actor(p->tex, anim_frame(&p->anim), p->x - cam_x, p->y, flip, alpha);
+}
+
+void player_draw_shadow(const player_t *p, float cam_x) {
+    if (p->state == P_DEATH) return;
+    draw_shadow(&g_assets.shadow, p->x - cam_x, p->y - 2.0f, 58.0f, 0.85f);
 }
 
 int player_get_hitbox(const player_t *p, float *x, float *y, float *w, float *h, float *dmg) {

@@ -25,6 +25,7 @@ typedef struct {
 void enemy_spawn(enemy_t *e, enemy_kind_t kind, float x, float y);
 void enemy_update(enemy_t *e, player_t *player, float dt);
 void enemy_draw(const enemy_t *e, float cam_x);
+void enemy_draw_shadow(const enemy_t *e, float cam_x);
 /* Applies damage from the player's sword; returns 1 if this hit killed it
  * (caller can award the kill / trigger any on-kill effects). */
 int  enemy_take_hit(enemy_t *e, float dmg, float from_x);

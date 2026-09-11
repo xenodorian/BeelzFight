@@ -61,12 +61,24 @@ static int load_raw(bz_texture_t *out, const char *path, int frame_w, int frame_
     out->frame_h = frame_h ? frame_h : h;
     out->cols = cols ? cols : 1;
     out->fmt = fmt;
+    /* Sensible defaults for textures loaded without sheet metadata
+     * (backgrounds): anchored at the centre, drawn at 1:1. */
+    out->anchor_x = out->frame_w * 0.5f;
+    out->anchor_y = out->frame_h * 0.5f;
+    out->draw_w = (float)out->frame_w;
+    out->draw_h = (float)out->frame_h;
 
     int list = (fmt == 1) ? PVR_LIST_OP_POLY : PVR_LIST_TR_POLY;
     int pvrfmt = (fmt == 1 ? PVR_TXRFMT_RGB565 : PVR_TXRFMT_ARGB4444) | PVR_TXRFMT_NONTWIDDLED;
 
+    /* Bilinear, not nearest: every sprite here is anti-aliased art drawn at
+     * a non-integer magnification (a 112px frame shown at 167px), and the
+     * backgrounds are stretched vertically as well, so point sampling
+     * produces visibly ragged, shimmering edges as things scroll. The
+     * generator guarantees a 1px empty gutter inside every sheet cell, so
+     * filtering at a frame's edge cannot bleed in the neighbouring frame. */
     pvr_poly_cxt_t cxt;
-    pvr_poly_cxt_txr(&cxt, list, pvrfmt, w, h, vram, PVR_FILTER_NEAREST);
+    pvr_poly_cxt_txr(&cxt, list, pvrfmt, w, h, vram, PVR_FILTER_BILINEAR);
     /* Pure 2D: draw order alone decides layering, not the depth buffer. */
     cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
     cxt.gen.culling = PVR_CULLING_NONE; /* vertex winding isn't guaranteed CW/CCW here; never cull */
@@ -85,7 +97,14 @@ int texture_load(bz_texture_t *out, const char *path, int frame_w, int frame_h, 
 }
 
 int texture_load_sheet(bz_texture_t *out, const bz_sheet_t *sheet) {
-    return load_raw(out, sheet->pvr_file, sheet->frame_w, sheet->frame_h, sheet->cols);
+    int rc = load_raw(out, sheet->pvr_file, sheet->frame_w, sheet->frame_h, sheet->cols);
+    if (rc == 0) {
+        out->anchor_x = sheet->anchor_x;
+        out->anchor_y = sheet->anchor_y;
+        out->draw_w = sheet->draw_w;
+        out->draw_h = sheet->draw_h;
+    }
+    return rc;
 }
 
 int texture_load_bg(bz_texture_t *out, const bz_bg_t *bg) {
