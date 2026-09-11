@@ -10,6 +10,12 @@
 # classic manual pipeline (kos-objcopy -> scramble -> genisoimage -> cdi4dc)
 # otherwise. Either way the ISO root is romdisc/ (which already holds
 # textures/*.pvr from scripts/png_to_pvr.py) plus the scrambled 1ST_READ.BIN.
+#
+# The output here is padded to full GD-ROM size (~740MB) as real hardware
+# and some burning tools expect. For a much smaller file to hand around for
+# emulator-only testing, add mkdcdisc's -N/--disable-data-track-padding,
+# e.g.: mkdcdisc -e beelzfight.elf -D romdisc -o build/beelzfight_small.cdi
+# -n "BeelzFight" -N --allow-overwrite -- functionally identical, ~6MB.
 
 set -e
 
