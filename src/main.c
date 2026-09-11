@@ -30,6 +30,11 @@ int main(int argc, char **argv) {
     (void)argc; (void)argv;
 
     video_init();
+    /* KOS's default dbgio target is the serial port ("scif"), which is
+     * invisible in a plain emulator screenshot; route dbglog/printf to the
+     * framebuffer console too so load failures and asserts are actually
+     * visible during QA instead of silently vanishing. */
+    dbgio_dev_select("fb");
     input_init();
     assets_load();
     srand((unsigned)timer_ms_gettime64());

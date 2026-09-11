@@ -69,6 +69,7 @@ static int load_raw(bz_texture_t *out, const char *path, int frame_w, int frame_
     pvr_poly_cxt_txr(&cxt, list, pvrfmt, w, h, vram, PVR_FILTER_NEAREST);
     /* Pure 2D: draw order alone decides layering, not the depth buffer. */
     cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.gen.culling = PVR_CULLING_NONE; /* vertex winding isn't guaranteed CW/CCW here; never cull */
     cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
     if (fmt != 1) {
         cxt.gen.alpha = PVR_ALPHA_ENABLE;

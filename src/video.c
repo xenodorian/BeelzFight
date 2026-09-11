@@ -7,8 +7,16 @@ void video_init(void) {
      * additional negotiation. */
     vid_set_mode(DM_640x480_VGA, PM_RGB565);
 
+    /* opb_sizes is {OP_POLY, OP_MOD, TR_POLY, TR_MOD, PT_POLY}. Nearly
+     * everything this game draws (every sprite, all HUD) is ARGB4444 and
+     * goes through the translucent list (see beelz.h's render-order
+     * contract) -- giving it a BINSIZE_0 tile-binning buffer, as an
+     * earlier version of this did, means the GPU has nowhere to bin those
+     * primitives and the very first translucent draw call corrupts
+     * execution instead of rendering. Only OP_MOD/TR_MOD/PT_POLY are
+     * genuinely unused here (no modifier volumes or punch-through). */
     pvr_init_params_t params = {
-        { PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_0, PVR_BINSIZE_0, PVR_BINSIZE_0 },
+        { PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_0 },
         512 * 1024,
         0, 0, 0
     };
@@ -50,6 +58,13 @@ static void submit_quad(const pvr_poly_hdr_t *hdr, float x0, float y0, float x1,
 
 static void frame_uv(const bz_texture_t *tex, int frame, int flip_x,
                       float *u0, float *v0, float *u1, float *v1) {
+    /* cols/w/h are 0 only if this texture's load failed (see texture.c);
+     * SH4 integer division by zero is a CPU trap, not a NaN, so this guard
+     * is load-bearing, not decorative. */
+    if (tex->cols <= 0 || tex->w <= 0 || tex->h <= 0) {
+        *u0 = *v0 = 0.0f; *u1 = *v1 = 0.0f;
+        return;
+    }
     int col = frame % tex->cols;
     int row = frame / tex->cols;
     float fu0 = (float)(col * tex->frame_w) / (float)tex->w;
@@ -66,6 +81,11 @@ static void frame_uv(const bz_texture_t *tex, int frame, int flip_x,
 
 void draw_tint_sprite(const bz_texture_t *tex, int frame, float x, float y, float w, float h,
                        int flip_x, float alpha_mul, float r, float g, float b) {
+    /* A texture whose load failed (see texture.c) never got a compiled
+     * pvr_poly_hdr_t -- submitting that zeroed header to the TA is at best
+     * a mis-render, at worst another way to corrupt the command stream.
+     * Skip it outright rather than draw garbage. */
+    if (!tex->ptr) return;
     float u0, v0, u1, v1;
     frame_uv(tex, frame, flip_x, &u0, &v0, &u1, &v1);
     uint8_t a = (uint8_t)(bz_clampf(alpha_mul, 0.0f, 1.0f) * 255.0f);
@@ -82,6 +102,7 @@ void draw_sprite(const bz_texture_t *tex, int frame, float x, float y, float w, 
  * screen for any scroll_x, using UV > 1.0 wrap (textures are POT so PVR
  * wraps cleanly) instead of manually stamping multiple quads. */
 void draw_bg_scroll(const bz_texture_t *tex, float scroll_x, float y, float draw_w, float draw_h) {
+    if (!tex->ptr || tex->w <= 0) return;
     float u_per_px = 1.0f / (float)tex->w;
     float u0 = scroll_x * u_per_px;
     float u1 = u0 + draw_w * u_per_px;
@@ -98,11 +119,13 @@ static void ensure_solid_headers(void) {
     pvr_poly_cxt_t cxt;
     pvr_poly_cxt_col(&cxt, PVR_LIST_OP_POLY);
     cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.gen.culling = PVR_CULLING_NONE; /* vertex winding isn't guaranteed CW/CCW here; never cull */
     cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
     pvr_poly_compile(&solid_hdr_op, &cxt);
 
     pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
     cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.gen.culling = PVR_CULLING_NONE; /* vertex winding isn't guaranteed CW/CCW here; never cull */
     cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
     cxt.gen.alpha = PVR_ALPHA_ENABLE;
     cxt.blend.src = PVR_BLEND_SRCALPHA;
@@ -147,36 +170,59 @@ void draw_bar(float x, float y, float w, float h, float pct, uint8_t r, uint8_t 
  * the string actually changes. */
 
 #define TXT_MAX_CHARS 32
-#define TXT_CHAR_PX 12
+#define TXT_CHAR_PX 12   /* BFONT_THIN_WIDTH -- glyph width in pixels */
+#define TXT_CHAR_H 24    /* BFONT_HEIGHT -- glyph height in pixels. Using
+                           * TXT_CHAR_PX for both used to under-allocate
+                           * the buffer by exactly half: bfont_draw_str
+                           * unconditionally writes BFONT_HEIGHT (24) rows
+                           * regardless of the buffer height you hand it,
+                           * so a 12-row buffer took a same-size (100%)
+                           * heap overflow on every text draw. */
 #define TXT_SLOTS 8
 
 typedef struct {
     char text[TXT_MAX_CHARS + 1];
     pvr_ptr_t vram;
     pvr_poly_hdr_t hdr;
-    int bufw;
+    int bufw;            /* logical (on-screen) text width in pixels    */
+    int pot_w, pot_h;     /* actual POT texture dimensions on the GPU     */
     int used;
 } bz_text_slot_t;
 
 static bz_text_slot_t g_text_slots[TXT_SLOTS];
 
+static int next_pow2(int v) {
+    int p = 1;
+    while (p < v) p *= 2;
+    return p;
+}
+
 static void upload_text_slot(bz_text_slot_t *slot, const char *str) {
-    static uint16_t buf[TXT_CHAR_PX * (TXT_CHAR_PX * TXT_MAX_CHARS)];
+    /* PVR textures -- even PVR_TXRFMT_NONTWIDDLED ones -- must be
+     * power-of-two in both dimensions; a texture sized to the literal
+     * (non-POT) string width/BFONT_HEIGHT corrupts pvr_poly_cxt_txr's
+     * size encoding and crashes the GPU command stream. So the actual
+     * buffer/texture is rounded up to POT, bfont renders into it using
+     * THAT as the row stride, and the final quad only samples the
+     * (bufw / pot_w, TXT_CHAR_H / pot_h) fraction that holds real text. */
+    static uint16_t buf[512 * 32]; /* worst case: pot_w for 32 chars (512) x pot_h (32) */
     int len = (int)strlen(str);
     if (len > TXT_MAX_CHARS) len = TXT_MAX_CHARS;
     if (len <= 0) len = 1;
     int bufw = TXT_CHAR_PX * len;
+    int pot_w = next_pow2(bufw);
+    int pot_h = next_pow2(TXT_CHAR_H);
 
-    for (int i = 0; i < bufw * TXT_CHAR_PX; i++)
+    for (int i = 0; i < pot_w * pot_h; i++)
         buf[i] = 0x0861; /* dark charcoal plaque, RGB565 */
 
     char tmp[TXT_MAX_CHARS + 1];
     memcpy(tmp, str, len);
     tmp[len] = 0;
-    bfont_draw_str(buf, bufw, 1, tmp);
+    bfont_draw_str(buf, pot_w, 1, tmp);
 
-    size_t bytes = (size_t)bufw * TXT_CHAR_PX * 2;
-    if (slot->vram && slot->bufw != bufw) {
+    size_t bytes = (size_t)pot_w * pot_h * 2;
+    if (slot->vram && (slot->pot_w != pot_w || slot->pot_h != pot_h)) {
         pvr_mem_free(slot->vram);
         slot->vram = NULL;
     }
@@ -193,8 +239,9 @@ static void upload_text_slot(bz_text_slot_t *slot, const char *str) {
     pvr_poly_cxt_t cxt;
     pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
                       PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED,
-                      bufw, TXT_CHAR_PX, slot->vram, PVR_FILTER_NEAREST);
+                      pot_w, pot_h, slot->vram, PVR_FILTER_NEAREST);
     cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.gen.culling = PVR_CULLING_NONE; /* vertex winding isn't guaranteed CW/CCW here; never cull */
     cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
     cxt.gen.alpha = PVR_ALPHA_ENABLE;
     cxt.blend.src = PVR_BLEND_SRCALPHA;
@@ -202,6 +249,8 @@ static void upload_text_slot(bz_text_slot_t *slot, const char *str) {
     pvr_poly_compile(&slot->hdr, &cxt);
 
     slot->bufw = bufw;
+    slot->pot_w = pot_w;
+    slot->pot_h = pot_h;
     strncpy(slot->text, tmp, TXT_MAX_CHARS);
     slot->text[TXT_MAX_CHARS] = 0;
     slot->used = 1;
@@ -217,7 +266,9 @@ void draw_text_slot(int slot, const char *str, float x, float y, float scale) {
     if (!s->used || strcmp(s->text, str) != 0)
         upload_text_slot(s, str);
     if (!s->used) return;
-    submit_quad(&s->hdr, x, y, x + s->bufw * scale, y + TXT_CHAR_PX * scale, 0, 0, 1, 1, 0xFFFFFFFF);
+    float u1 = (float)s->bufw / (float)s->pot_w;
+    float v1 = (float)TXT_CHAR_H / (float)s->pot_h;
+    submit_quad(&s->hdr, x, y, x + s->bufw * scale, y + TXT_CHAR_H * scale, 0, 0, u1, v1, 0xFFFFFFFF);
 }
 
 void draw_text(const char *str, float x, float y, float scale) {

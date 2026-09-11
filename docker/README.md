@@ -66,16 +66,16 @@ you keep the prebuilt toolchain:
   builder patches directly into GCC as real compiler builtins. This
   prebuilt toolchain predates those patches, so this header supplies
   portable C equivalents and is force-included into every KOS compile via
-  `KOS_CFLAGS` (see `environ.sh` generation in the Dockerfile). It is not
-  needed, and stops being included automatically, once KOS is built against
-  its own from-source, KOS-patched toolchain.
+  `KOS_CFLAGS` (see `environ.sh` generation in the Dockerfile). At the
+  KOS revision currently pinned (see "KOS/toolchain version match" below)
+  it is a no-op — nothing in that era's KOS sources references these
+  identifiers at all — and is kept only so bumping `KOS_COMMIT` forward
+  later needs no other changes here.
 - **`addons/` (optional extra libraries, e.g. `libkosext2fs`) are not
   built.** They aren't needed for core KOS, PVR/2D-sprite rendering, or
-  anything in this repo, and at least one of them compiles with `-Werror`
-  and turns the same missing-builtins situation the compat shim works
-  around elsewhere back into a hard error for that one library specifically.
-  `kernel` (`libkallisti.a`) and all of `utils` (pvrtex, kmgenc, scramble,
-  makeip, ...) build and link cleanly.
+  anything in this repo. `kernel` (`libkallisti.a`) and the `utils` this
+  image needs (kmgenc, scramble, makeip, bin2c, bin2o, genromfs) build and
+  link cleanly.
 - **kos-ports was not populated.** kos-ports' own build system downloads
   each port's upstream source tarball directly from that port's own site at
   build time (zlib from zlib.net, etc) — again not reachable under the same
@@ -85,14 +85,78 @@ you keep the prebuilt toolchain:
   access. This is not required for anything in this repo: the PVR API used
   for 2D sprite rendering is part of core KOS, no port needed.
 
+### KOS/toolchain version match (read this if things crash at runtime)
+
+**Update, 2026-09-11: the original `KOS_COMMIT` pin (bleeding-edge KOS as of
+that date) produced binaries that built and looked structurally valid but
+crashed instantly when actually *run* in an emulator.** This was only
+caught once Flycast became available in this environment and someone
+booted the resulting `hello.elf`:
+
+```
+E[COMMON]: Flycast has stopped: Fatal: SH4 branch instruction in delay slot
+```
+
+That message is Flycast's SH4 block decoder refusing to execute a real
+ISA-level illegality (a branch instruction sitting in another branch's
+delay slot — forbidden on every real SH4). Instrumenting Flycast's decoder
+to log the faulting address (`core/hw/sh4/dyna/decoder.cpp`, right before
+it throws `FlycastException("Fatal: SH4 branch instruction in delay slot")`)
+showed execution landing squarely on `_irq_srt_addr`
+(`kernel/arch/dreamcast/kernel/entry.s`) — a plain *data* word (a saved
+register-context pointer), not code — meaning something had jumped to the
+address of that variable instead of through it, almost certainly during
+the very first hardware interrupt/exception delivery (the crash reliably
+hit ~400-700ms after REIOS handoff, consistent with KOS's first
+timer-preemption tick). `entry.s`'s copyright header reads "2025 Falco
+Girgis": it was substantially rewritten for faster IRQ context save/restore
+in Dec 2023 and again in Aug 2025, and per KallistiOS's own `utils/dc-chain`
+patch history, KOS-patched GCC builds gained the custom compiler builtins
+`gcc9-compat.h` above works around only in Jan 2023 — i.e. bleeding-edge
+KOS's exception-entry code was written against calling-convention/codegen
+assumptions roughly two years newer than this prebuilt toolchain (built
+2021-03-15, confirmed via `docker inspect` on the toolchain image).
+
+**Fix: `KOS_COMMIT` is now pinned to `057d05fe4f2b6fc3e2c93215d3b83c871ae4e23c`
+(2021-04-24)** — the newest commit reachable from a
+`--shallow-since=2021-03-01` fetch of KOS's master branch, i.e. right at
+this toolchain's own build date, carrying the original (c)2000-2001 Dan
+Potter `entry.s`, well before either IRQ rewrite, and from before any of
+`gcc9-compat.h`'s builtins existed in KOS at all. Confirmed: both KOS's own
+`hello.elf` (stock, and a `dbgio_dev_select("fb")` variant — see the
+Validation section below for why stock `hello.c` alone isn't a conclusive
+visual test) and this repo's `beelzfight.elf` now boot past REIOS and run
+real KOS/game code without that crash.
+
+**Trade-off knowingly accepted:** this KOS revision predates the `pvrtex`
+PNG→PVR texture converter (added Aug 2024) and `elf2bin` (added Nov 2023),
+so neither is built into this image anymore (`utils/Makefile`'s `DIRS` list
+and the tree layout at this commit don't have them at all). This is
+confirmed harmless for this specific repo: BeelzFight's own asset pipeline
+(`scripts/png_to_pvr.py`) deliberately hand-writes PVR-ready
+ARGB4444/RGB565 texture blobs instead of depending on KOS's
+`pvrtex`/`kmgenc`, the textures are pre-generated and already committed
+under `romdisc/textures/*.pvr`, and disc packaging goes through `mkdcdisc`
+(built fresh from source, independent of the KOS revision) rather than the
+manual `elf2bin`+`scramble`+`genisoimage` fallback below. A project that
+does need `pvrtex`/`elf2bin` should bump `KOS_COMMIT` forward past this
+era instead — and would then need to work through (or wait out) the
+entry.s incompatibility described above first.
+
+**If `beelzfight.elf`/`beelzfight.cdi` themselves still fail after this
+fix**, that points at a bug in this repo's own game code rather than the
+toolchain/KOS pin — see "Validation performed" below for the specific
+failure last observed there, which is exactly that kind of bug (not a
+delay-slot/ISA-legality crash, and not present in KOS's own examples).
+
 Pinned revisions (see `ARG`s at the top of `Dockerfile.romdev`):
 
 | Component  | Source                                              | Commit / version |
 |------------|------------------------------------------------------|-------------------|
-| KallistiOS | https://github.com/KallistiOS/KallistiOS              | `caf8fbfa8464af5701e000b47c2bb910055a3206` |
+| KallistiOS | https://github.com/KallistiOS/KallistiOS              | `057d05fe4f2b6fc3e2c93215d3b83c871ae4e23c` (2021-04-24) |
 | kos-ports  | https://github.com/KallistiOS/kos-ports                | `f4faacc42faaf552625777b7709e871a827e1055` |
 | mkdcdisc   | https://gitlab.com/simulant/mkdcdisc                   | `4d74e40dd2122e14389a305ed1d86dd024201389` |
-| sh-elf / arm-eabi toolchain | `mirror.gcr.io/einsteinx2/dcdev-kos-toolchain:gcc-9` | GCC 9.3.0 / 8.4.0 |
+| sh-elf / arm-eabi toolchain | `mirror.gcr.io/einsteinx2/dcdev-kos-toolchain:gcc-9` | GCC 9.3.0 / 8.4.0 (built 2021-03-15) |
 
 ## Building the image
 
@@ -221,7 +285,12 @@ genisoimage -G IP.BIN -C 0,11702 -V "BEELZHELLO" -joliet -rock -l \
 ```
 
 - `elf2bin`/`scramble`/`makeip` all come from KOS's own `utils/` and are on
-  `PATH` once `environ.sh` is sourced.
+  `PATH` once `environ.sh` is sourced. **`elf2bin` is not built into this
+  image at the currently-pinned KOS revision** (see "KOS/toolchain version
+  match" above) — use `kos-objcopy -O binary in.elf out.bin` directly
+  instead (that's all `elf2bin` itself does; `kos-objcopy` is unaffected,
+  it comes from the cross-toolchain, not this KOS checkout) if you need
+  this manual fallback path.
 - `-G IP.BIN` tells `genisoimage` to write `IP.BIN`'s contents into the
   volume's boot sector; `-C 0,11702` is the conventional
   session-offset/padding pair used for Dreamcast self-boot discs;
@@ -244,20 +313,75 @@ genisoimage -G IP.BIN -C 0,11702 -V "BEELZHELLO" -joliet -rock -l \
 
 ## Validation performed
 
+Static checks (a binary that merely *looks* right):
+
 - `sh-elf-gcc --version` / `arm-eabi-gcc --version` and a trivial
   `sh-elf-gcc -c` compile, run as part of the image build itself (so a
   broken toolchain fails the build, not silently ships).
 - Full KallistiOS `kernel` + `utils` build from the pinned commit above
-  (`libkallisti.a`, `pvrtex`, `kmgenc`, `scramble`, `makeip`, ...),
-  including the ARM sound driver (`stream.drv`, built with `arm-eabi-gcc`
-  during the KOS build itself).
-- `examples/dreamcast/hello` (KOS's own "Hello world!" example) compiled
-  inside a container from the built image via `source environ.sh && make`,
-  producing `hello.elf`; confirmed with `file hello.elf`:
-  `ELF 32-bit LSB executable, Renesas SH, version 1 (SYSV), statically
-  linked, ...` — a genuine SH4 target binary.
-- `hello.elf` packaged into a bootable disc image both ways documented
-  above (`mkdcdisc` -> `.cdi`/`.iso`, and the manual
-  `elf2bin`+`scramble`+`makeip`+`genisoimage` sequence -> `.iso`), with the
-  `SEGA SEGAKATANA` IP.BIN signature confirmed present at the correct
-  offset in every resulting image.
+  (`libkallisti.a`, `kmgenc`, `scramble`, `makeip`, `bin2c`, `bin2o`,
+  `genromfs`), including the ARM sound driver (`stream.drv`, built with
+  `arm-eabi-gcc` during the KOS build itself).
+- `examples/dreamcast/hello` (KOS's own "Hello world!" example) and this
+  repo's own `beelzfight.elf` both compile and link cleanly, producing
+  genuine SH4 ELF binaries (`file`-confirmed) and, via `mkdcdisc`, bootable
+  `.cdi`s with the `SEGA SEGAKATANA` IP.BIN signature at the correct offset.
+
+**These alone are not sufficient** — an earlier version of this image
+passed every check above and still crashed instantly when actually run;
+see "KOS/toolchain version match" above. Runtime validation, in
+[Flycast](../tools/run_flycast_headless.sh) (headless, screenshot-capturing):
+
+- **KOS's stock `hello.elf`**: boots cleanly through REIOS with no crash.
+  Note: a screenshot of *stock* `hello.c` alone is black and proves
+  little either way — KOS's `dbgio` console auto-selects `"scif"` (serial)
+  over `"fb"` (on-screen text) by priority order, and `scif_detected()`
+  unconditionally returns 1 ("we are always detected, though we might end
+  up realizing there's no cable connected later") — so `printf`'s "Hello
+  world!" goes out an unconnected serial port and the screen is black even
+  on a fully correct boot. A one-line variant that calls
+  `dbgio_dev_select("fb")` before printing (same `hello.c`, otherwise
+  unmodified, built the same way) was used for an actual visual pass/fail
+  signal instead, and does render "Hello world!" on screen, confirmed via
+  screenshot, with no crash across several seconds (including live thread
+  preemption/timer IRQs, via a `thd_sleep()` loop) — i.e. exception
+  delivery, not just straight-line code, is confirmed working correctly.
+- **This repo's `beelzfight.elf`**, built via `docker/compile.sh` then
+  packaged via `scripts/build_cdi.sh` (`mkdcdisc`) exactly as documented in
+  the main README: boots through REIOS with **no delay-slot/ISA crash**
+  (the bug above is fixed), but currently still crashes about 3.5-3.7
+  seconds into boot, before anything is ever drawn to screen (screenshots
+  taken as early as 2s in are black; the crash consistently happens before
+  the first one would show anything). The failure is a *different*, later
+  kind of fault:
+
+  ```
+  E[COMMON]: Flycast has stopped: Fatal: SH4 exception when blocked
+  ```
+
+  This is Flycast refusing to take a second real CPU exception (illegal
+  instruction, `expEvn=0x180`, not a delay-slot issue) while the SH4 was
+  already inside another exception's handler (`SR.BL=1` — a double-fault,
+  which resets real hardware; Flycast just stops instead). Instrumenting
+  `Do_Exception()` in `core/hw/sh4/sh4_interrupts.cpp` to log addresses
+  showed: the *outer* exception (already in progress, `BL=1`) interrupted
+  code inside KOS's `scif_flush()` (i.e. a normal `printf`/dbgio flush, most
+  likely preempted by KOS's ordinary timer-tick thread-switch IRQ — routine
+  and expected); the *inner*, fatal one is an illegal-instruction fault at
+  `epc=0x8c00e0a2` — an address **13-14 KB below `beelzfight.elf`'s own
+  lowest loaded segment** (its `.text` starts at `0x8c010000`; nothing in
+  the ELF maps below that). That address range is where the disc's
+  scramble/bootstrap loader stub normally lives before KOS's own code takes
+  over, i.e. by the time this fires, the CPU is executing through a pointer
+  into stale/leftover memory that was never legitimately code at this point
+  in execution — the signature of a stray/uninitialized function pointer,
+  corrupted return address, or similar memory-safety bug, not a toolchain
+  or KOS-version issue (KOS's own thread/interrupt machinery was just
+  exercised cleanly for several seconds by the `hello.c`/`fb` test above
+  with no such fault). This looks like a bug in this repo's own `src/`
+  (`assets.c`/`texture.c`'s malloc/free + `pvr_mem_malloc` texture-loading
+  path, and/or the main loop in `main.c`, are the most likely places to
+  start — nothing else in `src/` registers custom IRQ handlers or holds
+  function pointers) rather than something further toolchain/KOS work can
+  fix; see the parent README/task notes for how to reproduce and iterate on
+  it directly.

@@ -142,8 +142,44 @@ RUN --mount=type=secret,id=extra_ca \
 # Pinned source revisions (reproducibility). Update these to move to a newer
 # KOS/kos-ports/mkdcdisc revision. Pinned as of 2026-09-11 research for this
 # image (mkdcdisc from https://gitlab.com/simulant/mkdcdisc).
+#
+# KOS_COMMIT: era-matched to the prebuilt toolchain, NOT bleeding-edge KOS.
+# See the "KOS/toolchain version match" note further down (right before the
+# KOS build RUN step) for the full story: bleeding-edge KOS's IRQ/exception
+# entry code (kernel/arch/dreamcast/kernel/entry.s) was substantially
+# rewritten in Dec 2023 and again in Aug 2025 for a faster context-save
+# path, and a program built against that code crashes instantly on real
+# hardware exception delivery (SH4 "branch instruction in delay slot",
+# confirmed both via Flycast's SH4 block decoder and by disassembling the
+# resulting binary) when linked against this 2021-era prebuilt toolchain --
+# almost certainly because that newer entry.s was written against
+# calling-convention/codegen assumptions (and, per KOS's own dc-chain patch
+# history, an actual KOS-patched GCC) that postdate this toolchain by
+# 18-24 months. 057d05fe4f2b6fc3e2c93215d3b83c871ae4e23c (2021-04-24) is the
+# newest commit reachable from a shallow `--shallow-since=2021-03-01` fetch
+# of master -- i.e. right at this toolchain's own build date (2021-03-15,
+# confirmed via `docker inspect` on the toolchain image) -- carrying the
+# original (c)2000-2001 Dan Potter entry.s, well before either rewrite, and
+# before any of the custom compiler-builtin identifiers gcc9-compat.h below
+# works around even existed in KOS (so that shim is a no-op for this
+# revision; kept only so re-bumping KOS_COMMIT forward needs no other
+# changes here). Confirmed booting KOS's own hello.elf and this repo's
+# beelzfight.elf correctly in Flycast at this pin -- see docker/README.md.
+#
+# Trade-off knowingly accepted: this KOS revision predates the `pvrtex`
+# PNG->PVR texture converter (added Aug 2024) and `elf2bin` (added Nov
+# 2023), so neither is built into this image (see the tool-install RUN
+# below). Confirmed harmless for this repo specifically: BeelzFight's own
+# asset pipeline (scripts/png_to_pvr.py) deliberately writes PVR-ready
+# ARGB4444/RGB565 texture blobs by hand instead of depending on KOS's
+# pvrtex/kmgenc, textures are pre-generated and already committed under
+# romdisc/textures/*.pvr, and disc packaging goes through mkdcdisc (built
+# fresh from source below, independent of the KOS revision) rather than the
+# manual elf2bin+scramble+genisoimage fallback. A project that does need
+# pvrtex/elf2bin should bump KOS_COMMIT forward past this era instead (and
+# would then need to work through the entry.s incompatibility above first).
 # ---------------------------------------------------------------------------
-ARG KOS_COMMIT=caf8fbfa8464af5701e000b47c2bb910055a3206
+ARG KOS_COMMIT=057d05fe4f2b6fc3e2c93215d3b83c871ae4e23c
 ARG KOS_PORTS_COMMIT=f4faacc42faaf552625777b7709e871a827e1055
 ARG MKDCDISC_COMMIT=4d74e40dd2122e14389a305ed1d86dd024201389
 
@@ -220,36 +256,53 @@ RUN git init -q "${KOS_PORTS}" \
 COPY gcc9-compat.h /opt/toolchains/dc/compat/gcc9-compat.h
 
 # ---------------------------------------------------------------------------
-# Build KallistiOS itself: libkallisti (kernel, cross-compiled with the
-# sh-elf toolchain via the kos-cc wrapper) and all PC-side utils (built with
-# the host compiler), including pvrtex and kmgenc (PNG -> PVR texture
-# converters), scramble, makeip, bin2c, bin2o, genromfs, elf2bin.
+# KOS/toolchain version match (see the long KOS_COMMIT note above the ARGs
+# for the full investigation and reasoning -- summary only, here):
 #
-# `addons` (kernel/../addons -- optional extra libraries such as
-# libkosext2fs, not required for core KOS or PVR/sprite rendering) is
-# deliberately NOT built here: at least one addon (libkosext2fs) builds with
-# -Werror and trips on the same missing-builtins issue the compat shim above
-# works around everywhere else, turning the warning back into a hard error
-# for that one addon specifically. Core KOS (kernel + utils, everything this
-# image and a 2D/PVR-sprite game need) builds and links cleanly. Building
-# against a from-source, current GCC (see the top-of-file note) would not
-# need either carve-out.
+# This pinned KOS revision (2021-04-24) predates the newer, faster IRQ
+# entry/exit assembly (kernel/arch/dreamcast/kernel/entry.s) that ships in
+# bleeding-edge KOS, and predates the custom compiler builtins
+# (__align_up/__is_aligned/__builtin_is_aligned/__builtin_set_thread_pointer)
+# gcc9-compat.h below works around -- so for this revision specifically,
+# the -include of that shim is a no-op (nothing in this era's KOS sources
+# references those identifiers at all). It is kept anyway, appended the
+# same way, purely so that bumping KOS_COMMIT forward past this era later
+# needs no other changes here.
+#
+# Build KallistiOS itself: libkallisti (kernel, cross-compiled with the
+# sh-elf toolchain via the kos-cc wrapper) and the PC-side utils this image
+# needs (built with the host compiler): kmgenc, scramble, makeip, bin2c,
+# genromfs. `bin2o` at this KOS revision is a checked-in prebuilt binary,
+# not something to build. `make -C utils` alone only builds this revision's
+# default DIRS list (genromfs, wav2adpcm, vqenc, scramble, dcbumpgen,
+# makeip) -- kmgenc and bin2c aren't in it and are built explicitly below.
+# Neither `pvrtex` nor `elf2bin` exist in the tree at this revision (both
+# were added to KOS well after this commit); see the KOS_COMMIT note above
+# for why that's fine for this repo.
+#
+# `addons` (kernel/../addons, optional extra libraries such as
+# libkosext2fs) is not built here either: not required for core KOS or
+# PVR/sprite rendering, and moot at this KOS revision regardless (the
+# -Werror/missing-builtins issue that carve-out used to work around at
+# bleeding-edge KOS doesn't apply to this era's toolchain-agnostic addons).
 # ---------------------------------------------------------------------------
 RUN cp "${KOS_BASE}/doc/environ.sh.sample" "${KOS_BASE}/environ.sh" \
     && echo 'export KOS_CFLAGS="${KOS_CFLAGS} -include /opt/toolchains/dc/compat/gcc9-compat.h"' >> "${KOS_BASE}/environ.sh" \
-    && bash -lc "source ${KOS_BASE}/environ.sh && cd ${KOS_BASE} && make -C utils -j\$(nproc) && make -C kernel -j\$(nproc)"
+    && bash -lc "source ${KOS_BASE}/environ.sh && cd ${KOS_BASE} \
+        && make -C utils -j\$(nproc) \
+        && make -C utils/kmgenc -j\$(nproc) \
+        && make -C utils/bin2c -j\$(nproc) \
+        && make -C kernel -j\$(nproc)"
 
 # Install/collect the PC-side tools onto DC_TOOLS_BASE (already on PATH via
 # environ.sh) so they're directly invocable without cd'ing into utils/*.
 RUN bash -lc "source ${KOS_BASE}/environ.sh \
-    && make -C \${KOS_BASE}/utils/pvrtex install \
     && cp \${KOS_BASE}/utils/kmgenc/kmgenc      \${DC_TOOLS_BASE}/ \
     && cp \${KOS_BASE}/utils/makeip/makeip      \${DC_TOOLS_BASE}/ \
     && cp \${KOS_BASE}/utils/scramble/scramble  \${DC_TOOLS_BASE}/ \
     && cp \${KOS_BASE}/utils/bin2c/bin2c        \${DC_TOOLS_BASE}/ \
     && cp \${KOS_BASE}/utils/bin2o/bin2o        \${DC_TOOLS_BASE}/ \
     && cp \${KOS_BASE}/utils/genromfs/genromfs  \${DC_TOOLS_BASE}/ \
-    && cp \${KOS_BASE}/utils/elf2bin/elf2bin    \${DC_TOOLS_BASE}/ \
     && chmod +x \${DC_TOOLS_BASE}/*"
 
 # ---------------------------------------------------------------------------
