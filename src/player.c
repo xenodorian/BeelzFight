@@ -39,7 +39,7 @@ static void enter_state(player_t *p, player_state_t s, const bz_anim_t *def) {
     anim_play(&p->anim, p->tex, def);
 }
 
-static int attack_index_from_buttons(uint32 pressed) {
+static int attack_index_from_buttons(uint32_t pressed) {
     if (pressed & CONT_A) return 1;
     if (pressed & CONT_B) return 2;
     if (pressed & CONT_X) return 3;

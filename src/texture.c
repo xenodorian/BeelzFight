@@ -15,8 +15,8 @@ static int load_raw(bz_texture_t *out, const char *path, int frame_w, int frame_
     }
 
     char magic[4];
-    uint16 w, h;
-    uint8 fmt, reserved;
+    uint16_t w, h;
+    uint8_t fmt, reserved;
 
     if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "BPVR", 4) != 0) {
         dbglog(DBG_ERROR, "beelz: bad texture magic in %s\n", path);

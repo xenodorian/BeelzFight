@@ -61,15 +61,15 @@ void draw_sprite(const bz_texture_t *tex, int frame, float x, float y, float w, 
 void draw_tint_sprite(const bz_texture_t *tex, int frame, float x, float y, float w, float h,
                        int flip_x, float alpha_mul, float r, float g, float b);
 void draw_bg_scroll(const bz_texture_t *tex, float scroll_x, float y, float draw_w, float draw_h);
-void draw_quad(float x, float y, float w, float h, uint8 r, uint8 g, uint8 b, uint8 a);
-void draw_bar(float x, float y, float w, float h, float pct, uint8 r, uint8 g, uint8 b);
+void draw_quad(float x, float y, float w, float h, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+void draw_bar(float x, float y, float w, float h, float pct, uint8_t r, uint8_t g, uint8_t b);
 void draw_text(const char *str, float x, float y, float scale);
 void draw_text_slot(int slot, const char *str, float x, float y, float scale);
 
 /* ---- input ---------------------------------------------------------- */
 
 typedef struct {
-    uint32 buttons, buttons_prev, pressed, released;
+    uint32_t buttons, buttons_prev, pressed, released;
     int ltrig, rtrig;
     int joyx, joyy;
 } bz_input_t;

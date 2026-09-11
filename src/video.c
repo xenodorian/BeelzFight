@@ -27,7 +27,7 @@ void render_sprite_list_end(void)   { pvr_list_finish(); }
 void render_frame_end(void) { pvr_scene_finish(); }
 
 static void submit_quad(const pvr_poly_hdr_t *hdr, float x0, float y0, float x1, float y1,
-                         float u0, float v0, float u1, float v1, uint32 argb) {
+                         float u0, float v0, float u1, float v1, uint32_t argb) {
     pvr_vertex_t v;
     const float z = 1.0f;
 
@@ -68,8 +68,8 @@ void draw_tint_sprite(const bz_texture_t *tex, int frame, float x, float y, floa
                        int flip_x, float alpha_mul, float r, float g, float b) {
     float u0, v0, u1, v1;
     frame_uv(tex, frame, flip_x, &u0, &v0, &u1, &v1);
-    uint8 a = (uint8)(bz_clampf(alpha_mul, 0.0f, 1.0f) * 255.0f);
-    uint32 argb = (a << 24) | ((uint8)(r * 255) << 16) | ((uint8)(g * 255) << 8) | (uint8)(b * 255);
+    uint8_t a = (uint8_t)(bz_clampf(alpha_mul, 0.0f, 1.0f) * 255.0f);
+    uint32_t argb = (a << 24) | ((uint8_t)(r * 255) << 16) | ((uint8_t)(g * 255) << 8) | (uint8_t)(b * 255);
     submit_quad(&tex->hdr, x, y, x + w, y + h, u0, v0, u1, v1, argb);
 }
 
@@ -118,14 +118,14 @@ static void ensure_solid_headers(void) {
  * HUD draw_quad/draw_bar/draw_text* only between render_sprite_list_begin
  * and render_sprite_list_end, after drawing world sprites, so they also
  * win the same-list submission-order tiebreak (see beelz.h). */
-void draw_quad(float x, float y, float w, float h, uint8 r, uint8 g, uint8 b, uint8 a) {
+void draw_quad(float x, float y, float w, float h, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     ensure_solid_headers();
-    uint32 argb = (a << 24) | (r << 16) | (g << 8) | b;
+    uint32_t argb = (a << 24) | (r << 16) | (g << 8) | b;
     (void)solid_hdr_op;
     submit_quad(&solid_hdr_tr, x, y, x + w, y + h, 0, 0, 0, 0, argb);
 }
 
-void draw_bar(float x, float y, float w, float h, float pct, uint8 r, uint8 g, uint8 b) {
+void draw_bar(float x, float y, float w, float h, float pct, uint8_t r, uint8_t g, uint8_t b) {
     pct = bz_clampf(pct, 0.0f, 1.0f);
     draw_quad(x, y, w, h, 40, 40, 40, 255);          /* backing plate */
     draw_quad(x + 2, y + 2, (w - 4) * pct, h - 4, r, g, b, 255);
@@ -161,7 +161,7 @@ typedef struct {
 static bz_text_slot_t g_text_slots[TXT_SLOTS];
 
 static void upload_text_slot(bz_text_slot_t *slot, const char *str) {
-    static uint16 buf[TXT_CHAR_PX * (TXT_CHAR_PX * TXT_MAX_CHARS)];
+    static uint16_t buf[TXT_CHAR_PX * (TXT_CHAR_PX * TXT_MAX_CHARS)];
     int len = (int)strlen(str);
     if (len > TXT_MAX_CHARS) len = TXT_MAX_CHARS;
     if (len <= 0) len = 1;

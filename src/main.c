@@ -41,12 +41,12 @@ int main(int argc, char **argv) {
     input.buttons = input.buttons_prev = input.pressed = input.released = 0;
     input.ltrig = input.rtrig = input.joyx = input.joyy = 0;
 
-    uint64 last_ms = timer_ms_gettime64();
+    uint64_t last_ms = timer_ms_gettime64();
 
     while (1) {
         input_update(&input);
 
-        uint64 now_ms = timer_ms_gettime64();
+        uint64_t now_ms = timer_ms_gettime64();
         float dt = (float)(now_ms - last_ms) / 1000.0f;
         last_ms = now_ms;
         if (dt > 0.05f) dt = 0.05f; /* clamp huge stalls (e.g. first frame) */

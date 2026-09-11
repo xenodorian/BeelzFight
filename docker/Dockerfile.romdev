@@ -1,3 +1,11 @@
+# syntax=mirror.gcr.io/docker/dockerfile:1
+#
+# (Pulled from Google's mirror.gcr.io rather than docker.io directly -- same
+# reachability reason as everything else pinned to that mirror in this file;
+# swap back to `docker/dockerfile:1` wherever Docker Hub is reachable
+# normally. This pin is only needed for the optional `--mount=type=secret`
+# step below; drop it, and that RUN's `--mount` line, if not needed.)
+#
 # docker/Dockerfile.romdev
 #
 # Reproducible "romdev" environment for BeelzFight (Sega Dreamcast homebrew).
@@ -5,8 +13,10 @@
 # Produces an image with: sh-elf-gcc + arm-eabi-gcc cross toolchains, a
 # freshly built KallistiOS (KOS) (libkallisti + PC-side utils: pvrtex,
 # kmgenc, scramble, makeip, bin2c, bin2o, genromfs, elf2bin, kos-cc/...),
-# kos-ports basics (zlib, libpng), mkdcdisc (modern ELF -> bootable .cdi/.gdi
-# packager), and genisoimage/mkisofs as a manual ISO9660 fallback.
+# a kos-ports checkout (ready for `make install` on any port, though none
+# are prebuilt here -- see the "kos-ports basics" note below), mkdcdisc
+# (modern ELF -> bootable .cdi/.gdi packager), and genisoimage/mkisofs as a
+# manual ISO9660 fallback.
 #
 # ---------------------------------------------------------------------------
 # WHY THIS IMAGE IS BUILT THE WAY IT IS (read before changing the base image)
@@ -114,6 +124,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
+# Optional extra CA certificate, for building behind a TLS-inspecting
+# corporate/CI proxy. Off by default and a no-op unless the build is given
+# one via `--secret id=extra_ca,src=/path/to/ca.pem` (see docker/build.sh's
+# EXTRA_CA_BUNDLE support) -- BuildKit leaves the mount empty rather than
+# erroring when no such secret is supplied, and secret contents are never
+# written into any image layer by the mount itself, only by the explicit
+# `update-ca-certificates` step below when a cert was actually provided.
+# ---------------------------------------------------------------------------
+RUN --mount=type=secret,id=extra_ca \
+    if [ -s /run/secrets/extra_ca ]; then \
+        cp /run/secrets/extra_ca /usr/local/share/ca-certificates/extra-ca.crt \
+        && update-ca-certificates; \
+    fi
+
+# ---------------------------------------------------------------------------
 # Pinned source revisions (reproducibility). Update these to move to a newer
 # KOS/kos-ports/mkdcdisc revision. Pinned as of 2026-09-11 research for this
 # image (mkdcdisc from https://gitlab.com/simulant/mkdcdisc).
@@ -184,19 +209,40 @@ RUN git init -q "${KOS_PORTS}" \
     && echo "${KOS_PORTS_COMMIT}" > /opt/toolchains/dc/KOS_PORTS_COMMIT.txt
 
 # ---------------------------------------------------------------------------
-# Build KallistiOS itself: libkallisti (kernel + addons, cross-compiled with
-# the sh-elf toolchain via the kos-cc wrapper) and all PC-side utils (built
-# with the host compiler), including pvrtex and kmgenc (PNG -> PVR texture
+# Compatibility shim: modern KOS calls a few identifiers
+# (__align_up/__is_aligned/__builtin_is_aligned/__builtin_set_thread_pointer)
+# that are meant to be supplied by KOS's own custom GCC patches (applied by
+# utils/kos-chain when building a toolchain from source), not by any header.
+# This prebuilt toolchain predates those patches, so provide portable C
+# equivalents instead and force-include them into every KOS compile via
+# KOS_CFLAGS below. See docker/gcc9-compat.h for the full explanation.
+# ---------------------------------------------------------------------------
+COPY gcc9-compat.h /opt/toolchains/dc/compat/gcc9-compat.h
+
+# ---------------------------------------------------------------------------
+# Build KallistiOS itself: libkallisti (kernel, cross-compiled with the
+# sh-elf toolchain via the kos-cc wrapper) and all PC-side utils (built with
+# the host compiler), including pvrtex and kmgenc (PNG -> PVR texture
 # converters), scramble, makeip, bin2c, bin2o, genromfs, elf2bin.
+#
+# `addons` (kernel/../addons -- optional extra libraries such as
+# libkosext2fs, not required for core KOS or PVR/sprite rendering) is
+# deliberately NOT built here: at least one addon (libkosext2fs) builds with
+# -Werror and trips on the same missing-builtins issue the compat shim above
+# works around everywhere else, turning the warning back into a hard error
+# for that one addon specifically. Core KOS (kernel + utils, everything this
+# image and a 2D/PVR-sprite game need) builds and links cleanly. Building
+# against a from-source, current GCC (see the top-of-file note) would not
+# need either carve-out.
 # ---------------------------------------------------------------------------
 RUN cp "${KOS_BASE}/doc/environ.sh.sample" "${KOS_BASE}/environ.sh" \
-    && bash -lc "source ${KOS_BASE}/environ.sh && cd ${KOS_BASE} && make -j\$(nproc)"
+    && echo 'export KOS_CFLAGS="${KOS_CFLAGS} -include /opt/toolchains/dc/compat/gcc9-compat.h"' >> "${KOS_BASE}/environ.sh" \
+    && bash -lc "source ${KOS_BASE}/environ.sh && cd ${KOS_BASE} && make -C utils -j\$(nproc) && make -C kernel -j\$(nproc)"
 
 # Install/collect the PC-side tools onto DC_TOOLS_BASE (already on PATH via
 # environ.sh) so they're directly invocable without cd'ing into utils/*.
 RUN bash -lc "source ${KOS_BASE}/environ.sh \
     && make -C \${KOS_BASE}/utils/pvrtex install \
-    && make -C \${KOS_BASE}/utils/makeip install \
     && cp \${KOS_BASE}/utils/kmgenc/kmgenc      \${DC_TOOLS_BASE}/ \
     && cp \${KOS_BASE}/utils/makeip/makeip      \${DC_TOOLS_BASE}/ \
     && cp \${KOS_BASE}/utils/scramble/scramble  \${DC_TOOLS_BASE}/ \
@@ -207,13 +253,21 @@ RUN bash -lc "source ${KOS_BASE}/environ.sh \
     && chmod +x \${DC_TOOLS_BASE}/*"
 
 # ---------------------------------------------------------------------------
-# kos-ports basics. The PVR 2D API used for sprite rendering is part of core
-# KOS (no port needed), but zlib/libpng are foundational dependencies used
-# throughout kos-ports and are cheap to build up front.
+# kos-ports basics: NOT built in this image.
+#
+# The PVR 2D API used for sprite rendering is part of core KOS (no port
+# needed for that), but even the "basics" (zlib, libpng) could not be built
+# here: kos-ports' own build system downloads each port's upstream source
+# tarball directly from that project's own site at build time (zlib from
+# zlib.net, libpng from its own release host, etc) -- an open-ended set of
+# arbitrary hosts that is not reachable under the same egress policy
+# documented at the top of this file (confirmed: zlib.net is denied,
+# returning a short policy-denial body in place of the tarball). The
+# kos-ports checkout is still cloned above (at $KOS_PORTS) and is fully
+# usable for `make install` on any individual port once this image is run
+# somewhere with normal internet access, or once a port's source tarball is
+# placed in its distfiles directory by hand.
 # ---------------------------------------------------------------------------
-RUN bash -lc "source ${KOS_BASE}/environ.sh \
-    && cd \${KOS_PORTS}/zlib   && make install clean \
-    && cd \${KOS_PORTS}/libpng && make install clean"
 
 # ---------------------------------------------------------------------------
 # mkdcdisc: Simulant's modern successor to scramble+makeip+img4dc. One
