@@ -10,7 +10,7 @@ typedef struct {
 typedef struct { const char *pvr_file; int w, h, tile_x; } bz_bg_t;
 
 static const bz_sheet_t SHEET_PLAYER = {
-    "/cd/textures/player.pvr", 64, 64, 512, 512, 8
+    "/cd/textures/player.pvr", 96, 96, 1024, 512, 10
 };
 static const bz_anim_t PLAYER_ANIM_IDLE = {0, 4, 5, 1};
 static const bz_anim_t PLAYER_ANIM_RUN = {4, 4, 10, 1};

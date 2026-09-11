@@ -88,7 +88,11 @@ static inline float bz_lerp(float a, float b, float t) { return a + (b - a) * t;
 
 #define GROUND_Y        380.0f   /* screen-space y of everyone's feet     */
 #define LEVEL_LENGTH    3600.0f  /* total scroll distance to the arena    */
-#define PLAYER_DISPLAY  96.0f
+/* 144 = 48 (logical canvas) * 3, preserving the original logical-pixel-to
+ * screen-pixel zoom factor (96/32) from before the canvas was enlarged to
+ * stop clipping the hair/sword -- otherwise she'd render visibly smaller
+ * than intended. */
+#define PLAYER_DISPLAY  144.0f
 #define IMP_DISPLAY     72.0f
 #define THRALL_DISPLAY  84.0f
 #define BOSS_DISPLAY    220.0f

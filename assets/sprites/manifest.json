@@ -2,11 +2,11 @@
   "sheets": {
     "player": {
       "file": "player.png",
-      "frame_w": 64,
-      "frame_h": 64,
-      "sheet_w": 512,
+      "frame_w": 96,
+      "frame_h": 96,
+      "sheet_w": 1024,
       "sheet_h": 512,
-      "cols": 8,
+      "cols": 10,
       "anims": {
         "idle": {
           "start": 0,

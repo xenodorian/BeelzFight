@@ -40,6 +40,22 @@ def blank(w, h):
     return Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
 
+def apply_flash(img, color):
+    """Tint the character with `color` for a hit-reaction flash -- but only
+    where she's already drawn. A plain alpha_composite of a full-canvas
+    tint rectangle affects the *entire* frame, including all the empty
+    space around her silhouette; since the canvas is comfortably larger
+    than her (to stop clipping the hair/sword, see P_LOGICAL/E_LOGICAL/
+    B_LOGICAL), that empty margin used to be small enough to go unnoticed
+    but is now big enough to render as a glaring solid-colored box. Masking
+    by her own original alpha keeps the tint confined to her silhouette."""
+    orig_alpha = img.split()[3]
+    tint_layer = Image.new("RGBA", img.size, color)
+    composited = Image.alpha_composite(img, tint_layer)
+    mask = orig_alpha.point(lambda a: 255 if a > 0 else 0)
+    return Image.composite(composited, blank(*img.size), mask)
+
+
 def rotp(cx, cy, x, y, deg):
     a = math.radians(deg)
     dx, dy = x - cx, y - cy
@@ -77,16 +93,28 @@ def make_sheet(frames, frame_w, frame_h, name):
     for i, fr in enumerate(frames):
         cx = (i % cols) * frame_w
         cy = (i // cols) * frame_h
-        sheet.paste(fr, (cx, cy), fr)
+        # No mask arg: each cell starts fully transparent and cells never
+        # overlap, so this is a plain pixel copy. Passing `fr` as its own
+        # mask (paste(fr, pos, fr)) looks equivalent but isn't -- PIL's
+        # masked paste blends the source alpha as a linear weight against
+        # the (0,0,0,0) destination for BOTH rgb and alpha, so any
+        # translucent pixel (flash overlays, death fade, boss wings) came
+        # out darkened and less opaque than drawn, e.g. flash red
+        # (255,90,90,200) landed in the sheet as (200,71,71,157) -- a
+        # visible black-bleed halo on every semi-transparent edge.
+        sheet.paste(fr, (cx, cy))
     path = os.path.join(SPR_DIR, f"{name}.png")
     sheet.save(path)
     return sheet_w, sheet_h, cols, path
 
 
 # ================================================================== PLAYER
-# 32x32 logical grid, scaled x2 -> 64x64 frame slot.
+# 48x48 logical grid, scaled x2 -> 96x96 frame slot. The original 32x32
+# clipped the top of the hair/ahoge on literally every frame, and the
+# sword tip during wide swings; 48x48 with a centered shoulder pivot (see
+# draw_player_base/player_frame) gives every direction enough margin.
 P_SCALE = 2
-P_LOGICAL = 32
+P_LOGICAL = 48
 P_FRAME = P_LOGICAL * P_SCALE
 
 PAL_PLAYER = dict(
@@ -110,12 +138,15 @@ PAL_PLAYER = dict(
 
 
 def draw_player_base(d, pal, leg_off=0, arm_off=0, bob=0, lean=0, expr="normal"):
-    """Draw the girl's body (everything except the sword) at logical coords."""
-    cx = 16
-    hip_y = 22 + bob
+    """Draw the girl's body (everything except the sword) at logical coords.
+    cx/hip_y are chosen so the shoulder pivot (see player_frame) sits near
+    the canvas center, leaving symmetric margin for the sword to swing
+    through a full spin without clipping any edge."""
+    cx = 24
+    hip_y = 34 + bob
     # legs
-    lf = 14 + lean * 0.3
-    rf = 18 + lean * 0.3
+    lf = cx - 2 + lean * 0.3
+    rf = cx + 2 + lean * 0.3
     d.rectangle([lf - 1 + leg_off, hip_y, lf + 1 + leg_off, hip_y + 6], fill=pal["dress"])
     d.rectangle([rf - 1 - leg_off, hip_y, rf + 1 - leg_off, hip_y + 6], fill=pal["dress"])
     d.rectangle([lf - 1 + leg_off, hip_y + 6, lf + 1 + leg_off, hip_y + 8], fill=pal["boot"])
@@ -209,15 +240,13 @@ def player_frame(pose):
     shoulder, torso_top = draw_player_base(d, pal, leg_off=leg_off, bob=bob, lean=lean, expr=expr)
     sh_pt = (shoulder + 3, torso_top + 2)
     if pose.get("guard"):
-        draw_sword(d, pal, sh_pt, pose.get("angle", -20), length=pose.get("length", 20),
+        draw_sword(d, pal, sh_pt, pose.get("angle", -20), length=pose.get("length", 14),
                    width=pose.get("width", 7.5))
     else:
-        draw_sword(d, pal, sh_pt, pose.get("angle", 40), length=pose.get("length", 22),
+        draw_sword(d, pal, sh_pt, pose.get("angle", 40), length=pose.get("length", 15),
                    width=pose.get("width", 7.5))
     if pose.get("flash"):
-        ov = blank(P_LOGICAL, P_LOGICAL)
-        ImageDraw.Draw(ov).rectangle([0, 0, P_LOGICAL - 1, P_LOGICAL - 1], fill=pal["flash"])
-        img = Image.alpha_composite(img, ov)
+        img = apply_flash(img, pal["flash"])
     if pose.get("fade") is not None:
         r, g, b, a = img.split()
         a = a.point(lambda v: int(v * pose["fade"]))
@@ -247,60 +276,69 @@ def build_player():
         {"angle": 10, "leg_off": 0, "lean": 3, "bob": -1},
     ], fps=10)
 
+    # Attack lengths below are sized to the shoulder pivot's actual margin
+    # to the canvas edge (see player_frame/draw_player_base): the pivot
+    # sits near the 48x48 canvas center with ~21-25px to each edge, and a
+    # blade of length L reaches roughly L*1.18+1.5px from the pivot (the
+    # forward-swept widest point plus tip width). Attack4 sweeps through
+    # all four directions in one animation, so it uses the tightest-margin
+    # length; attack3's thrust is the most one-directional and can run
+    # slightly longer.
+
     # Attack 1 (A) - horizontal slash, left to right
     add("attack1", [
-        {"angle": 150, "length": 20, "lean": -2},
-        {"angle": 90, "length": 24, "lean": 1},
-        {"angle": 10, "length": 26, "lean": 3},
-        {"angle": -30, "length": 22, "lean": 2},
+        {"angle": 150, "length": 14, "lean": -2},
+        {"angle": 90, "length": 16, "lean": 1},
+        {"angle": 10, "length": 18, "lean": 3},
+        {"angle": -30, "length": 16, "lean": 2},
     ], fps=14)
     anims["attack1"]["loop"] = False
 
     # Attack 2 (B) - overhead chop
     add("attack2", [
-        {"angle": -110, "length": 20, "bob": -2},
-        {"angle": -70, "length": 24, "bob": -1},
-        {"angle": -20, "length": 26, "bob": 0},
-        {"angle": 20, "length": 22, "bob": 1},
+        {"angle": -110, "length": 14, "bob": -2},
+        {"angle": -70, "length": 16, "bob": -1},
+        {"angle": -20, "length": 18, "bob": 0},
+        {"angle": 20, "length": 16, "bob": 1},
     ], fps=14)
     anims["attack2"]["loop"] = False
 
     # Attack 3 (X) - forward thrust
     add("attack3", [
-        {"angle": 10, "length": 14, "lean": -1},
-        {"angle": 5, "length": 28, "lean": 2},
-        {"angle": 5, "length": 30, "lean": 3},
-        {"angle": 8, "length": 18, "lean": 0},
+        {"angle": 10, "length": 12, "lean": -1},
+        {"angle": 5, "length": 17, "lean": 2},
+        {"angle": 5, "length": 19, "lean": 3},
+        {"angle": 8, "length": 14, "lean": 0},
     ], fps=16)
     anims["attack3"]["loop"] = False
 
     # Attack 4 (Y) - spin finisher, full rotation
     add("attack4", [
-        {"angle": 0, "length": 24, "bob": -1},
-        {"angle": 90, "length": 26, "bob": 0},
-        {"angle": 180, "length": 26, "bob": 1},
-        {"angle": 270, "length": 26, "bob": 0},
-        {"angle": 360, "length": 24, "bob": -1},
+        {"angle": 0, "length": 15, "bob": -1},
+        {"angle": 90, "length": 15, "bob": 0},
+        {"angle": 180, "length": 15, "bob": 1},
+        {"angle": 270, "length": 15, "bob": 0},
+        {"angle": 360, "length": 15, "bob": -1},
     ], fps=14)
     anims["attack4"]["loop"] = False
 
     # Parry (L) - quick raised guard
     add("parry", [
-        {"angle": -60, "length": 18, "guard": True, "width": 4},
-        {"angle": -80, "length": 20, "guard": True, "width": 5},
+        {"angle": -60, "length": 14, "guard": True, "width": 4},
+        {"angle": -80, "length": 15, "guard": True, "width": 5},
     ], fps=12)
     anims["parry"]["loop"] = False
 
     # Block (R) - sword held up, static hold
     add("block", [
-        {"angle": -70, "length": 18, "guard": True, "width": 4},
-        {"angle": -70, "length": 18, "guard": True, "width": 4, "flash": True},
+        {"angle": -70, "length": 14, "guard": True, "width": 4},
+        {"angle": -70, "length": 14, "guard": True, "width": 4, "flash": True},
     ], fps=6)
 
     # Hit reaction
     add("hit", [
-        {"angle": 60, "length": 18, "lean": -4, "expr": "hit", "flash": True},
-        {"angle": 60, "length": 18, "lean": -4, "expr": "hit"},
+        {"angle": 60, "length": 14, "lean": -4, "expr": "hit", "flash": True},
+        {"angle": 60, "length": 14, "lean": -4, "expr": "hit"},
     ], fps=8)
     anims["hit"]["loop"] = False
 
@@ -334,7 +372,7 @@ def imp_frame(pose, pal):
     crouch = pose.get("crouch", 0)
     leg = pose.get("leg", 0)
     lunge = pose.get("lunge", 0)
-    hy = 10 + crouch
+    hy = 13 + crouch  # was 10: horn tips (hy-10) sat exactly on row 0, clipped
     # legs
     d.rectangle([cx - 4 + leg, 22 + crouch, cx - 2 + leg, 27 + crouch], fill=pal["dark"])
     d.rectangle([cx + 2 - leg, 22 + crouch, cx + 4 - leg, 27 + crouch], fill=pal["dark"])
@@ -395,7 +433,7 @@ def thrall_frame(pose, pal):
     cx = 16
     leg = pose.get("leg", 0)
     lunge = pose.get("lunge", 0)
-    hy = 6
+    hy = 10  # was 6: head top (hy-5) sat 1px from row 0, looked flat-topped
     d.rectangle([cx - 3 + leg, 21, cx - 1 + leg, 29], fill=pal["dark"])
     d.rectangle([cx + 1 - leg, 21, cx + 3 - leg, 29], fill=pal["dark"])
     d.rectangle([cx - 4, hy + 4, cx + 4, 22], fill=pal["skin"])
@@ -496,9 +534,7 @@ def boss_frame(pose):
     d.rectangle([cx + 2, hy + 6, cx + 5, hy + 8], fill=pal["eye"])
 
     if pose.get("flash"):
-        ov = blank(B_LOGICAL, B_LOGICAL)
-        ImageDraw.Draw(ov).rectangle([0, 0, B_LOGICAL - 1, B_LOGICAL - 1], fill=(255, 255, 255, 90))
-        img = Image.alpha_composite(img, ov)
+        img = apply_flash(img, (255, 255, 255, 90))
     if fade is not None:
         r, g, b, a = img.split()
         a = a.point(lambda v: int(v * fade))
