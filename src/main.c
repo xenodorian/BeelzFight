@@ -1,4 +1,5 @@
 #include <kos.h>
+#include <stdlib.h>
 #include "beelz.h"
 #include "assets.h"
 #include "level.h"
@@ -31,6 +32,7 @@ int main(int argc, char **argv) {
     video_init();
     input_init();
     assets_load();
+    srand((unsigned)timer_ms_gettime64());
 
     game_state_t gs = GS_TITLE;
     level_t level;
