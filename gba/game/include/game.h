@@ -128,4 +128,10 @@ void bossUpdate(void);
 void bossRender(void);
 void bossHudRender(void);
 
+/* ---- text.c ------------------------------------------------------------*/
+void textInit(void);
+void textClear(void);
+void textDrawString(int row, int col, const char *s);
+void textShow(void);
+
 #endif

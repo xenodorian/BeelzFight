@@ -394,6 +394,53 @@ def gen_background():
     save_indexed(img, "bg.png", colors=16)
 
 
+# ---------------------------------------------------------------------------
+# Font: one 8x8 tile per printable ASCII char (32=space .. 126=~), stacked
+# vertically -- tile index = ord(ch) - 32. Used for our own hand-rolled BG
+# text renderer (source/text.c) instead of libgba's consoleDemoInit(), which
+# turned out not to render on at least one real-world GBA emulator (the
+# backdrop color showed but no glyphs) -- rolling our own means the same
+# plain-memcpy tile/palette loading path already proven for the background
+# and sprites is what draws the title/win/lose text too.
+# ---------------------------------------------------------------------------
+from PIL import ImageFont
+
+FONT_FIRST = 32
+FONT_LAST = 126
+FONT_COUNT = FONT_LAST - FONT_FIRST + 1
+
+
+def gen_font():
+    pil_font = ImageFont.load_default()
+    sheet = Image.new("RGB", (8, 8 * FONT_COUNT), TRANSPARENT)
+    for i in range(FONT_COUNT):
+        ch = chr(FONT_FIRST + i)
+        # Render to a grayscale layer and threshold -- PIL antialiases text
+        # even for bitmap fonts, which would blow past our tiny color cap.
+        mask = Image.new("L", (8, 8), 0)
+        if ch != " ":
+            # Every glyph in this bitmap font occupies exactly an 8px-tall
+            # band, but *which* 8 rows varies: cap-height letters sit at
+            # y=2..10, descenders (g, p, y, ...) at y=4..12, etc. A single
+            # fixed offset for all of them clips whichever glyphs it isn't
+            # tuned for -- tried -1 (clipped every glyph's bottom row,
+            # turning 'E' into an 'F' shape and 'L' into a bare stroke),
+            # then a uniform -2 (still clipped descenders' tails, e.g. 'y'
+            # rendering as 'v'). Shifting each glyph by its own measured
+            # top instead fits all of them with no clipping either way.
+            top = pil_font.getbbox(ch)[1]
+            ImageDraw.Draw(mask).text((0, -top), ch, font=pil_font, fill=255)
+        img = Image.new("RGB", (8, 8), TRANSPARENT)
+        px = img.load()
+        mpx = mask.load()
+        for y in range(8):
+            for x in range(8):
+                if mpx[x, y] >= 128:
+                    px[x, y] = (255, 255, 255)
+        sheet.paste(img, (0, i * 8))
+    save_indexed(sheet, "font.png", colors=4)
+
+
 if __name__ == "__main__":
     gen_player()
     gen_enemy()
@@ -402,3 +449,4 @@ if __name__ == "__main__":
     gen_heart()
     gen_hpseg()
     gen_background()
+    gen_font()

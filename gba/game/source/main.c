@@ -50,16 +50,13 @@ static void showTextScreen(const char *line1, const char *line2) {
 	oamUpdate();
 	BG_OFFSET[0].x = 0;
 	BG_OFFSET[0].y = 0;
-	consoleDemoInit();
-	/* consoleDemoInit() does not reset the console's cursor row across
-	 * repeated calls (only the tile/graphics setup), so printing relative
-	 * to "current position" via plain \n drifts down a row on every title
-	 * <-> play <-> win/lose cycle. Position each line with an explicit
-	 * ANSI cursor move instead, so placement is deterministic every time. */
-	int col1 = (30 - (int)strlen(line1)) / 2;
-	int col2 = (30 - (int)strlen(line2)) / 2;
-	iprintf("\x1b[7;%dH%s", col1, line1);
-	iprintf("\x1b[9;%dH%s", col2, line2);
+	textInit();
+	textClear();
+	int col1 = (32 - (int)strlen(line1)) / 2;
+	int col2 = (32 - (int)strlen(line2)) / 2;
+	textDrawString(9, col1, line1);
+	textDrawString(11, col2, line2);
+	textShow();
 }
 
 static void startGame(void) {
