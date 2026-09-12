@@ -3,5 +3,7 @@ build/
 *.o
 *.iso
 *.cdi
+*.gba
+*.sav
 __pycache__/
 assets/sprites/_preview.png

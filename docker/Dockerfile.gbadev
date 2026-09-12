@@ -1,0 +1,22 @@
+# syntax=mirror.gcr.io/docker/dockerfile:1
+#
+# docker/Dockerfile.gbadev
+#
+# "gbadev" environment for BeelzFight (Game Boy Advance homebrew).
+#
+# Unlike docker/Dockerfile.romdev (the Dreamcast environment this project
+# started with), this one needs no from-source toolchain build at all:
+# devkitPro publishes a complete, current, official devkitARM image —
+# arm-none-eabi GCC/Binutils/Newlib, libgba, libtonc, and the GBA tools
+# (gbafix, gbalzss, grit) — directly on Docker Hub. The only reason this
+# thin wrapper exists (rather than using that image inline) is to pull it
+# through `mirror.gcr.io`, Google's public read-through mirror of Docker
+# Hub: this sandbox's network egress policy denies Docker Hub's own blob
+# CDN (`production.cloudfront.docker.com`) but allows `mirror.gcr.io`, the
+# same workaround docker/Dockerfile.romdev documents at length. Pinned by
+# digest for reproducibility.
+FROM mirror.gcr.io/devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
+
+ENV PATH="/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin:${PATH}"
+
+WORKDIR /project
