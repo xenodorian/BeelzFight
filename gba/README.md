@@ -5,9 +5,8 @@ and the Dreamcast-era code under `../src` for the game design this is meant
 to eventually carry over — none of that code is GBA-portable as-is, since
 GBA has no PVR-style texture hardware and runs on a very different CPU).
 
-This directory holds the GBA-specific toolchain scaffold, starting minimal:
-right now it's just a "hello world" ROM proving the build pipeline works,
-with no game logic yet.
+`gba/hello` is the original minimal toolchain smoke test. `gba/game` is the
+actual game: a side-scrolling action game (see `gba/game/README.md`).
 
 ## Toolchain
 
