@@ -1,9 +1,6 @@
 #include "game.h"
 
 #define BOSS_Y (GROUND_Y - 64)
-#define BOSS_OAM 1
-#define PROJECTILE_OAM_BASE 2
-#define HPSEG_OAM_BASE 19
 #define HPSEG_COUNT 10
 #define PROJECTILE_Y (GROUND_Y - 24)
 

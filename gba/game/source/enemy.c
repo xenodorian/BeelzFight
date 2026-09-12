@@ -1,9 +1,10 @@
 #include "game.h"
 
 #define ENEMY_Y (GROUND_Y - 16)
-#define ENEMY_OAM_BASE 6
 #define ENEMY_SPEED 1
 #define MELEE_RANGE 14
+#define LAUNCH_DURATION 36
+#define LAUNCH_HEIGHT 40
 
 void enemiesInit(void) {
 	for (int i = 0; i < MAX_ENEMIES; i++) {
@@ -21,10 +22,15 @@ void enemySpawn(int worldX) {
 			enemies[i].dying = 0;
 			enemies[i].walkAnim = 0;
 			enemies[i].lastHitId = -1;
+			enemies[i].launchTimer = 0;
 			return;
 		}
 	}
 	/* no free slot: dropped, wave spawner will retry later */
+}
+
+void enemyLaunch(int idx) {
+	enemies[idx].launchTimer = LAUNCH_DURATION;
 }
 
 void enemiesUpdate(void) {
@@ -38,6 +44,11 @@ void enemiesUpdate(void) {
 			continue;
 		}
 		if (e->hurt > 0) e->hurt--;
+
+		if (e->launchTimer > 0) {
+			e->launchTimer--; /* airborne: no movement, no attacking */
+			continue;
+		}
 
 		int dist = e->worldX - player.worldX;
 		if (dist > MELEE_RANGE) {
@@ -66,8 +77,16 @@ void enemiesRender(void) {
 			oamHideSprite(oamIdx);
 			continue;
 		}
+		int sy = ENEMY_Y;
 		int frame;
-		if (e->dying > 0) {
+		if (e->launchTimer > 0) {
+			/* simple cosmetic arc: up and back down over LAUNCH_DURATION */
+			int t = LAUNCH_DURATION - e->launchTimer;
+			int half = LAUNCH_DURATION / 2;
+			int riseFall = (t <= half) ? t : (LAUNCH_DURATION - t);
+			sy -= (riseFall * LAUNCH_HEIGHT) / half;
+			frame = EF_HURT;
+		} else if (e->dying > 0) {
 			frame = EF_HURT;
 		} else if (e->hurt > 0) {
 			frame = EF_HURT;
@@ -76,7 +95,7 @@ void enemiesRender(void) {
 			int inRange = (dist <= MELEE_RANGE && dist >= -MELEE_RANGE);
 			frame = inRange ? EF_ATTACK : ((e->walkAnim / 8) & 1 ? EF_WALK2 : EF_WALK1);
 		}
-		oamSetSprite(oamIdx, sx, ENEMY_Y, SQUARE, 1,
+		oamSetSprite(oamIdx, sx, sy, SQUARE, 1,
 		             TILE_ENEMY + frame * ENEMY_FRAME_TILES, PAL_ENEMY, 0, 0);
 	}
 }

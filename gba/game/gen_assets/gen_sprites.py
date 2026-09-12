@@ -25,6 +25,11 @@ BLADE = (222, 224, 232)
 BLADE_HI = (255, 255, 255)
 BLADE_D = (160, 162, 178)
 HILT = (140, 100, 46)
+CAST_ORB = (120, 220, 255)
+CAST_ORB_HI = BLADE_HI
+BURST_GLOW = CAST_ORB
+DASH_LINE = BLADE_HI
+BURST_TINT = (230, 230, 255)
 
 # Enemy (imp) palette
 IMP = (170, 40, 160)
@@ -98,7 +103,7 @@ def save_indexed(img, name, colors=16):
 # Frames: 0 idle, 1 walk1, 2 walk2, 3 light1, 4 light2, 5 heavy1, 6 heavy2,
 #         7 block, 8 parry, 9 hurt
 # ---------------------------------------------------------------------------
-PLAYER_FRAMES = 10
+PLAYER_FRAMES = 18
 PW, PH = 32, 32
 
 
@@ -149,6 +154,24 @@ def draw_sword(d, angle, lean=0):
         d.rectangle([6 + lean, 10, 10 + lean, 26], fill=OUTLINE)
         d.rectangle([7 + lean, 11, 9 + lean, 25], fill=BLADE)
         d.rectangle([6 + lean, 17, 12 + lean, 20], fill=HILT)
+    elif angle == "upslash":
+        # blade swept straight up, tip reaching past the top of the frame
+        d.rectangle([14 + lean, 0, 18 + lean, 22], fill=OUTLINE)
+        d.rectangle([15 + lean, 0, 17 + lean, 20], fill=BLADE)
+        d.rectangle([15 + lean, 0, 15 + lean, 20], fill=BLADE_HI)
+        d.rectangle([12 + lean, 20, 20 + lean, 25], fill=HILT)
+    elif angle == "lunge":
+        # long horizontal thrust, further reaching than a light attack
+        d.rectangle([18 + lean, 13, 31, 17], fill=OUTLINE)
+        d.rectangle([19 + lean, 14, 30, 16], fill=BLADE)
+        d.rectangle([19 + lean, 14, 30, 14], fill=BLADE_HI)
+        d.rectangle([13 + lean, 12, 19 + lean, 18], fill=HILT)
+    elif angle == "cast":
+        # blade held back, glowing orb charging at the tip
+        d.rectangle([6 + lean, 11, 10 + lean, 24], fill=OUTLINE)
+        d.rectangle([7 + lean, 12, 9 + lean, 23], fill=BLADE)
+        d.ellipse([2 + lean, 14, 8 + lean, 20], fill=CAST_ORB)
+        d.ellipse([3 + lean, 15, 7 + lean, 19], fill=CAST_ORB_HI)
 
 
 def make_player_frame(kind):
@@ -183,13 +206,48 @@ def make_player_frame(kind):
     elif kind == "hurt":
         draw_body(d, lean=-2, tint=(255, 150, 150))
         draw_sword(d, "down", lean=-2)
+    elif kind == "upslash1":
+        # crouched, blade drawn back low, coiled to spring upward
+        draw_body(d, lean=-1, arm_up=False)
+        draw_sword(d, "guard", lean=-1)
+    elif kind == "upslash2":
+        draw_body(d, lean=1, arm_up=True)
+        draw_sword(d, "upslash", lean=1)
+    elif kind == "dash1":
+        draw_body(d, lean=2, arm_up=True)
+        draw_sword(d, "lunge", lean=2)
+        d.line([(0, 20), (8, 20)], fill=DASH_LINE)
+        d.line([(0, 26), (6, 26)], fill=DASH_LINE)
+    elif kind == "dash2":
+        draw_body(d, lean=3, arm_up=True)
+        draw_sword(d, "lunge", lean=3)
+        d.line([(0, 16), (10, 16)], fill=DASH_LINE)
+        d.line([(0, 22), (9, 22)], fill=DASH_LINE)
+        d.line([(0, 28), (7, 28)], fill=DASH_LINE)
+    elif kind == "burst1":
+        draw_body(d, arm_up=True)
+        draw_sword(d, "guard")
+        d.ellipse([4, 8, 27, 31], outline=BURST_GLOW)
+    elif kind == "burst2":
+        draw_body(d, arm_up=True)
+        draw_sword(d, "guard")
+        d.ellipse([1, 5, 30, 31], outline=BURST_GLOW)
+        d.ellipse([4, 8, 27, 31], outline=BURST_GLOW)
+    elif kind == "shoot1":
+        draw_body(d, lean=-1, arm_up=True)
+        draw_sword(d, "cast", lean=-1)
+    elif kind == "shoot2":
+        draw_body(d, lean=1, arm_up=True)
+        draw_sword(d, "lunge", lean=1)
+        d.ellipse([27, 12, 32, 17], fill=CAST_ORB_HI)
     return img
 
 
 def gen_player():
     sheet = Image.new("RGB", (PW, PH * PLAYER_FRAMES), TRANSPARENT)
     order = ["idle", "walk1", "walk2", "light1", "light2", "heavy1", "heavy2",
-             "block", "parry", "hurt"]
+             "block", "parry", "hurt", "upslash1", "upslash2", "dash1", "dash2",
+             "burst1", "burst2", "shoot1", "shoot2"]
     for i, kind in enumerate(order):
         frame = make_player_frame(kind)
         sheet.paste(frame, (0, i * PH))
@@ -367,6 +425,38 @@ def gen_hpseg():
 
 
 # ---------------------------------------------------------------------------
+# Player shot: 8x8 single frame, the A+B combo's projectile. Cyan/white so
+# it reads as clearly different from the boss's orange fireball.
+# ---------------------------------------------------------------------------
+def gen_pshot():
+    img, d = new_img(8, 8)
+    d.ellipse([0, 1, 7, 6], fill=OUTLINE)
+    d.ellipse([1, 2, 6, 5], fill=(70, 160, 230))
+    d.ellipse([2, 2, 5, 4], fill=(220, 250, 255))
+    save_indexed(img, "pshot.png", colors=8)
+
+
+# ---------------------------------------------------------------------------
+# Spark: 8x8, 2 frames (big, small) -- a generic burst-of-light particle
+# reused (via OBJ palette swaps aren't needed; it's white/yellow already
+# neutral) for every combo's visual effect.
+# ---------------------------------------------------------------------------
+def gen_spark():
+    sheet = Image.new("RGB", (8, 16), TRANSPARENT)
+    for i, big in enumerate([True, False]):
+        img, d = new_img(8, 8)
+        if big:
+            d.line([(4, 0), (4, 7)], fill=(255, 220, 120))
+            d.line([(0, 4), (7, 4)], fill=(255, 220, 120))
+            d.line([(1, 1), (6, 6)], fill=(255, 255, 255))
+            d.line([(1, 6), (6, 1)], fill=(255, 255, 255))
+        else:
+            d.point([(4, 3), (4, 4), (3, 4), (4, 2), (5, 4)], fill=(255, 255, 255))
+        sheet.paste(img, (0, i * 8))
+    save_indexed(sheet, "spark.png", colors=4)
+
+
+# ---------------------------------------------------------------------------
 # Background: 256x256 (32x32 tiles), seamless horizontal wrap.
 # ---------------------------------------------------------------------------
 def gen_background():
@@ -450,3 +540,5 @@ if __name__ == "__main__":
     gen_hpseg()
     gen_background()
     gen_font()
+    gen_pshot()
+    gen_spark()

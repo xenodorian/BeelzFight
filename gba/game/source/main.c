@@ -12,10 +12,11 @@ Player player;
 Enemy enemies[MAX_ENEMIES];
 Boss boss;
 Projectile projectiles[MAX_PROJECTILES];
+PlayerShot playerShots[MAX_PLAYER_SHOTS];
+Particle particles[MAX_PARTICLES];
 int camX;
 GameState gameState;
 
-#define HEART_OAM_BASE 14
 #define BG_SCREEN_BLOCK 8
 
 typedef struct { int triggerX; int count; } Wave;
@@ -36,6 +37,7 @@ static void loadAssets(void) {
 	loadSpriteSheet(gfx_projectileTiles, gfx_projectileTilesLen, TILE_PROJECTILE, gfx_projectilePal, PAL_PROJECTILE);
 	loadSpriteSheet(gfx_heartTiles, gfx_heartTilesLen, TILE_HEART, gfx_heartPal, PAL_HEART);
 	loadSpriteSheet(gfx_hpsegTiles, gfx_hpsegTilesLen, TILE_HPSEG, gfx_hpsegPal, PAL_HPSEG);
+	fxInit();
 }
 
 static void loadBackground(void) {
@@ -63,6 +65,7 @@ static void startGame(void) {
 	playerInit();
 	enemiesInit();
 	bossInit();
+	fxInit();
 	camX = 0;
 	for (unsigned i = 0; i < NUM_WAVES; i++) waveDone[i] = 0;
 	pendingSpawns = 0;
@@ -134,6 +137,7 @@ int main(void) {
 			playerUpdate(held, down);
 			enemiesUpdate();
 			bossUpdate();
+			fxUpdate();
 			updateWaves();
 			updateCamera();
 
@@ -143,6 +147,7 @@ int main(void) {
 			playerRender();
 			enemiesRender();
 			bossRender();
+			fxRender();
 			renderHud();
 			oamUpdate();
 
