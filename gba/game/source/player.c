@@ -48,7 +48,7 @@ static void applyAttackHitbox(int lo, int hi, int dmg) {
 		Enemy *e = &enemies[i];
 		if (!e->active || e->dying) continue;
 		if (e->lastHitId == player.attackId) continue;
-		int elo = e->worldX + 2, ehi = e->worldX + 14;
+		int elo = e->worldX, ehi = e->worldX + 16; /* full sprite width: a generous, forgiving hitbox */
 		if (overlap(lo, hi, elo, ehi)) {
 			e->lastHitId = player.attackId;
 			e->hp -= dmg;
@@ -79,12 +79,16 @@ void playerUpdate(u16 held, u16 down) {
 		int total = (player.state == P_LIGHT) ? LIGHT_TOTAL : HEAVY_TOTAL;
 		int activeEnd = (player.state == P_LIGHT) ? LIGHT_ACTIVE_END : HEAVY_ACTIVE_END;
 		int startup = (player.state == P_LIGHT) ? LIGHT_STARTUP : HEAVY_STARTUP;
-		if (player.stateTimer == startup) {
+		/* Check every active frame, not just the instant startup ends: a
+		 * single-frame (1/60s) hit window was nearly impossible to land
+		 * even when correctly positioned, which read as "the enemies are
+		 * too small to hit" -- lastHitId already guards against a swing
+		 * hitting the same target twice, so widening this window is safe. */
+		if (player.stateTimer >= startup && player.stateTimer < activeEnd) {
 			int lo = player.worldX + (player.state == P_LIGHT ? LIGHT_LO : HEAVY_LO);
 			int hi = player.worldX + (player.state == P_LIGHT ? LIGHT_HI : HEAVY_HI);
 			applyAttackHitbox(lo, hi, player.state == P_LIGHT ? LIGHT_DMG : HEAVY_DMG);
 		}
-		(void)activeEnd;
 		player.stateTimer++;
 		if (player.stateTimer >= total) {
 			player.state = P_IDLE;
@@ -116,7 +120,7 @@ void playerUpdate(u16 held, u16 down) {
 		for (int i = 0; i < MAX_ENEMIES; i++) {
 			Enemy *e = &enemies[i];
 			if (!e->active || e->dying) continue;
-			int elo = e->worldX + 2, ehi = e->worldX + 14;
+			int elo = e->worldX, ehi = e->worldX + 16; /* full sprite width: a generous, forgiving hitbox */
 			if (overlap(hlo, hhi, elo, ehi)) {
 				if (player.state == P_BLOCK) {
 					/* blocked: no damage, hold ground */
