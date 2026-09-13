@@ -24,7 +24,13 @@ hello.elf: $(OBJS) ps1.ld
 hello.exe: hello.elf
 	$(OBJCOPY) -O binary -R .bss $< $@
 
-clean:
-	rm -f $(OBJS) hello.elf hello.exe
+# Requires exe2iso (https://github.com/grumpycoders/pcsx-redux/tree/main/tools/exe2iso)
+# on PATH -- see README.md for how to build it. Produces hello.bin (raw
+# 2352-byte-sector CD-XA image); pair it with hello.cue to mount/boot it.
+iso: hello.exe
+	exe2iso hello.exe -o hello.bin
 
-.PHONY: all clean
+clean:
+	rm -f $(OBJS) hello.elf hello.exe hello.bin
+
+.PHONY: all iso clean

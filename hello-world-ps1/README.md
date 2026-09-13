@@ -42,6 +42,10 @@ dump. No Sony code was sourced or used to build or run this.
 - `openbios.bin` -- a prebuilt copy of PCSX-Redux's OpenBIOS (see
   "Building OpenBIOS" below to rebuild it), for emulators that need a
   BIOS file path configured.
+- `hello.bin` / `hello.cue` -- a bootable CD-XA disc image wrapping
+  `hello.exe` (see "Building the ISO" below), for emulators/hardware
+  that boot from a disc image rather than sideloading an executable
+  directly.
 
 ## Building
 
@@ -68,6 +72,37 @@ git submodule update --init --depth 1 -- third_party/uC-sdk
 make -C src/mips/openbios PREFIX=mipsel-linux-gnu FORMAT=elf32-tradlittlemips
 ```
 
+### Building the ISO
+
+`hello.bin`/`hello.cue` were built from `hello.exe` with
+[exe2iso](https://github.com/grumpycoders/pcsx-redux/tree/main/tools/exe2iso)
+(part of PCSX-Redux, MIT/GPLv2 licensed), which writes a standards
+-conformant single-file CD-XA image (`PSX.EXE;1` at the root, with
+correct EDC/ECC on every raw 2352-byte sector) directly from a PS-EXE
+-- no manually-authored ISO9660 tree or `SYSTEM.CNF` needed; the BIOS's
+documented `PSX.EXE;1` fallback boot convention picks it up. It isn't
+part of the pre-packaged `pcsx-redux` binary, but is a small,
+self-contained host tool:
+
+```sh
+git clone https://github.com/grumpycoders/pcsx-redux.git
+cd pcsx-redux
+git submodule update --init --depth 1 -- third_party/fmt third_party/iec-60908b
+g++ -std=c++20 -DFMT_HEADER_ONLY -I. -Isrc -Ithird_party -Ithird_party/fmt/include \
+    tools/exe2iso/exe2iso.cc src/support/file.cc src/supportpsx/iso9660-builder.cc \
+    third_party/iec-60908b/edcecc.c third_party/iec-60908b/tables.c \
+    -o exe2iso
+./exe2iso /path/to/hello.exe -o hello.bin
+```
+
+Then pair the `.bin` with a one-line `.cue`:
+
+```
+FILE "hello.bin" BINARY
+  TRACK 01 MODE2/2352
+    INDEX 01 00:00:00
+```
+
 ## Running
 
 - **Mednafen**: point its `psx.bios_na`/`psx.bios_jp`/`psx.bios_eu`
@@ -84,6 +119,39 @@ make -C src/mips/openbios PREFIX=mipsel-linux-gnu FORMAT=elf32-tradlittlemips
   from a memory card via an existing bootloader); real hardware needs
   the real BIOS, not `openbios.bin` (OpenBIOS targets emulators and
   flashable replacement chips, not sideloading onto stock firmware).
+- **`hello.cue`/`hello.bin`** (the disc image, as opposed to sideloading
+  `hello.exe`): should work anywhere that boots a normal PS1 disc image
+  with OpenBIOS (or a real BIOS) configured -- PCSX-Redux itself is the
+  best-tested combination, since OpenBIOS is developed and tested
+  against it directly. See "Verification status" below for what was
+  and wasn't confirmed here.
+
+## Verification status
+
+`hello.exe` (direct sideload) is fully verified -- see the screenshot
+above, from Mednafen with `openbios.bin` as the configured BIOS.
+
+`hello.cue`/`hello.bin` (the disc image) was *not* successfully booted
+in this environment. Mednafen's own disc-format auto-detection doesn't
+recognize the image at all without a `-license` file baked in by
+`exe2iso` (its own README notes some emulators want one to recognize a
+disc; a real Sony license image wasn't sourced, consistent with this
+project's stance on not using copyrighted Sony content) -- passing
+`-force_module psx` bypasses that detection and gets the disc loading
+for real (OpenBIOS logs a real region/SCEx ID, no BIOS-sanity errors),
+but it then never reaches this project's own code: the screen stays
+black, at sustained ~87% CPU (i.e. actively running, not asleep or
+crashed) for over a minute, well past how long `hello.exe` takes to
+reach its first drawn frame directly. That points at OpenBIOS's own CD
+shell/filesystem boot path hitting something Mednafen's CD-ROM/disc
+emulation doesn't handle correctly, rather than a problem with
+`hello.exe` itself (already proven working) or with the disc image
+(built by `exe2iso`, the same tool the OpenBIOS project itself
+documents as producing images that "boot in emulators, on real
+hardware, and on ODEs"). PCSX-Redux -- OpenBIOS's own native/best-tested
+emulator, not built in this environment because it needs SDL3, which
+isn't packaged for this Ubuntu release -- or real hardware would be the
+next things to try it on.
 
 ## How it works
 
