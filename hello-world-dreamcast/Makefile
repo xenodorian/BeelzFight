@@ -21,7 +21,14 @@ src/hello.o: src/hello.c
 hello.elf: $(OBJS) dc.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
-clean:
-	rm -f $(OBJS) hello.elf
+# Requires mkdcdisc (https://gitlab.com/simulant/mkdcdisc) on PATH.
+# -N skips GD-ROM padding, for a small (~1.5MB) image; drop it for a
+# full-size (~740MB) disc if a burning tool insists on one.
+cdi: hello.elf
+	mkdcdisc -e hello.elf -o hello.cdi -n "Hello World" -a "BeelzFight" \
+		-N --allow-overwrite
 
-.PHONY: all clean
+clean:
+	rm -f $(OBJS) hello.elf hello.cdi
+
+.PHONY: all cdi clean
