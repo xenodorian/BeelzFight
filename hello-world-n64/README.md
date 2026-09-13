@@ -100,3 +100,21 @@ consistent with this repo's stance on the Dreamcast BIOS, was not
 sourced. Real hardware (a flashcart) or a more hardware-accurate
 emulator (e.g. ares) would be the way to confirm this boots cleanly
 outside of mupen64plus.
+
+**Update:** this was independently reproduced on Android via M64Plus FZ
+(a mupen64plus-core-based app) -- same symptom, boots to a black
+screen with nothing drawn. This is a confirmed, already-fixed upstream
+bug: [mupen64plus-core PR #1111](https://github.com/mupen64plus/mupen64plus-core/pull/1111)
+("Fix RDRAM initialization"), merged 2025-04-30, describes
+mupen64plus-core's RDRAM init failing to correctly identify memory
+chips -- exactly this failure mode -- and even mentions the standard
+homebrew-scene workaround for it ("hacks like setting the RI_SELECT
+register to a nonzero value"), which is a change to the *emulator*,
+not something a ROM can do from the outside. Any mupen64plus-core build
+(desktop mupen64plus, M64Plus FZ, or any other frontend/fork) older
+than that fix will hit this. Newer mupen64plus-core-based builds
+(once the fix propagates downstream), a different emulator (e.g.
+RetroArch's Mupen64Plus-Next core, or ares), or real hardware via a
+flashcart should all boot this ROM correctly -- the crash happens
+inside IPL3's own boot code, before this project's own VI setup or
+drawing code ever runs.
