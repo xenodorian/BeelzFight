@@ -1265,17 +1265,17 @@ static void draw_hud(int got_shelf, int looted_crate, int bag_bandage) {
  * Species/monster data and battle math, verbatim from data.lua's
  * SPECIES table, mintMonster(), grantXp(), and captureChance(). Move
  * names are upper-cased/depunctuated for our font; multi-word names
- * keep their space ("FIRE BOLT"). Cathleen's spellcaster kit
- * (castSpell -- Fire Bolt/Ice Beam/Lightning Strike/Mana Surge) isn't
- * ported: she's only reachable as a Grove NPC battle, which isn't
- * built yet (no NPCs exist in this port), so nothing can mint or
- * fight a Cathleen yet. Her species entry is still here for table
- * symmetry with data.lua and so mint_monster/grant_xp already work
- * for her once that NPC exists.
+ * keep their space ("FIRE BOLT"). Cathleen alone carries a spells[]
+ * list (spells_n > 0 for no other entry below) -- SPELL_FIREBOLT/
+ * ICEBEAM/LIGHTNING/MANASURGE (0-3, defined by battle_cast_spell()
+ * further down) matching data.ts's own spell id order for her. Every
+ * other species leaves spells_n at 0 and never touches battle_cast_spell.
  * ---------------------------------------------------------------------- */
 typedef struct {
     const char *name, *basic, *special;
     int maxHp, str, agl, spc, spp;
+    int spells_n;      /* 0 for every species but Cathleen */
+    int spells[4];     /* SPELL_* ids, spells_n of them valid */
 } Species;
 
 #define SP_QUILLPUP   0
@@ -1291,18 +1291,18 @@ typedef struct {
 #define SP_CRYMARE    10
 
 static const Species SPECIES[11] = {
-    /* name          basic       special         maxHp str agl spc spp */
-    { "QUILLPUP",   "NIP",       "QUILLBURST",   34, 15, 10, 7,  3 },
-    { "GLIMMOTH",   "DUSTWING",  "LAMPFLARE",    26, 7,  13, 16, 3 },
-    { "TORTCASK",   "SHOVE",     "SHELLSLAM",    42, 13, 5,  8,  3 },
-    { "RAZORBAT",   "RAKE",      "SWOOPCUT",     30, 14, 16, 9,  3 },
-    { "MOSSBACK",   "SQUELCH",   "MOSSGUARD",    38, 12, 6,  11, 3 },
-    { "BRIARFOX",   "BRAMBLE",   "THORNRUSH",    28, 13, 17, 10, 3 },
-    { "FENWISP",    "GLIM",      "FENFLARE",     24, 8,  16, 17, 3 },
-    { "DUSKHORN",   "GORE",      "DUSKRAM",      36, 16, 8,  7,  3 },
-    { "NEEDLEROOT", "PRICK",     "SAPDRAIN",     32, 12, 7,  14, 3 },
-    { "CATHLEEN",   "FIRE BOLT", "MANA SURGE",   38, 11, 13, 19, 4 },
-    { "CRYMARE",    "WAIL",      "NIGHTBRIDLE",  30, 9,  14, 18, 3 },
+    /* name          basic       special         maxHp str agl spc spp  spells_n  spells (0=firebolt,1=icebeam,2=lightning,3=manasurge) */
+    { "QUILLPUP",   "NIP",       "QUILLBURST",   34, 15, 10, 7,  3, 0, {0,0,0,0} },
+    { "GLIMMOTH",   "DUSTWING",  "LAMPFLARE",    26, 7,  13, 16, 3, 0, {0,0,0,0} },
+    { "TORTCASK",   "SHOVE",     "SHELLSLAM",    42, 13, 5,  8,  3, 0, {0,0,0,0} },
+    { "RAZORBAT",   "RAKE",      "SWOOPCUT",     30, 14, 16, 9,  3, 0, {0,0,0,0} },
+    { "MOSSBACK",   "SQUELCH",   "MOSSGUARD",    38, 12, 6,  11, 3, 0, {0,0,0,0} },
+    { "BRIARFOX",   "BRAMBLE",   "THORNRUSH",    28, 13, 17, 10, 3, 0, {0,0,0,0} },
+    { "FENWISP",    "GLIM",      "FENFLARE",     24, 8,  16, 17, 3, 0, {0,0,0,0} },
+    { "DUSKHORN",   "GORE",      "DUSKRAM",      36, 16, 8,  7,  3, 0, {0,0,0,0} },
+    { "NEEDLEROOT", "PRICK",     "SAPDRAIN",     32, 12, 7,  14, 3, 0, {0,0,0,0} },
+    { "CATHLEEN",   "FIRE BOLT", "MANA SURGE",   38, 11, 13, 19, 4, 4, {0,1,2,3} },
+    { "CRYMARE",    "WAIL",      "NIGHTBRIDLE",  30, 9,  14, 18, 3, 0, {0,0,0,0} },
 };
 
 typedef struct {
@@ -1562,14 +1562,72 @@ typedef struct {
 #define BAFTER_LOSS      7
 #define BAFTER_WIN_NOTE  9
 
-/* selfDebuffed(G) (the mirror of this, used by Cathleen's foe-AI mana
-   surge override chance) isn't ported -- see the section comment on
-   why Cathleen's kit is out of scope here. */
 static int battle_foe_debuffed(const Battle *b) {
     return b->mods_foe_str < 0 || b->mods_foe_agl < 0 || b->mods_foe_spc < 0;
 }
+/* selfDebuffed(): mirror of the above, checked from the foe's side of
+   castSpell's Mana Surge branch (whether the *player* is debuffed
+   decides the foe's 2x multiplier and their 55% chance to prioritize
+   casting it -- see battle_pick_guard's Cathleen branch below). */
+static int battle_self_debuffed(const Battle *b) {
+    return b->mods_self_str < 0 || b->mods_self_agl < 0 || b->mods_self_spc < 0;
+}
 static int battle_capture_chance(const Battle *b) {
     return capture_chance(b->foe.agl, b->foe.hp, b->foe.maxHp, battle_foe_debuffed(b));
+}
+
+/* Cathleen's spell kit (castSpell()): the only species in data.ts with
+   a `spells` list, so this only ever fires for her, on either side of
+   the fight (as the player's own captured lead, or as the wild foe).
+   from_player picks which side's mods get debuffed by the elemental
+   spells and, for Mana Surge, which side's debuff state doubles the
+   damage. Returns 0 (and leaves *out_dmg/out_label untouched) only for
+   a spent-PP Mana Surge cast, matching castSpell()'s early return
+   there. */
+#define SPELL_FIREBOLT  0
+#define SPELL_ICEBEAM   1
+#define SPELL_LIGHTNING 2
+#define SPELL_MANASURGE 3
+static int battle_cast_spell(Battle *b, int spell_id, int from_player, int *out_dmg, char *out_label) {
+    Monster *caster = from_player ? &b->pl : &b->foe;
+    int dmg = 0, n = 0;
+    char label[40];
+
+    if(spell_id == SPELL_FIREBOLT) {
+        if(from_player) b->mods_foe_str -= 4; else b->mods_self_str -= 4;
+        dmg = jground(5.0f + (float)caster->spc * 0.35f + (float)irand(0, 2));
+        if(dmg < 1) dmg = 1;
+        n = s_cat(label, 0, "FIRE BOLT  STR-4");
+    }
+    else if(spell_id == SPELL_ICEBEAM) {
+        if(from_player) b->mods_foe_agl -= 4; else b->mods_self_agl -= 4;
+        dmg = jground(5.0f + (float)caster->spc * 0.35f + (float)irand(0, 2));
+        if(dmg < 1) dmg = 1;
+        n = s_cat(label, 0, "ICE BEAM  AGI-4");
+    }
+    else if(spell_id == SPELL_LIGHTNING) {
+        if(from_player) b->mods_foe_spc -= 4; else b->mods_self_spc -= 4;
+        dmg = jground(5.0f + (float)caster->spc * 0.35f + (float)irand(0, 2));
+        if(dmg < 1) dmg = 1;
+        n = s_cat(label, 0, "LIGHTNING STRIKE  SPC-4");
+    }
+    else {
+        int debuffed, atk, def;
+        float mul;
+        if(caster->spp <= 0) return 0;
+        caster->spp--;
+        debuffed = from_player ? battle_foe_debuffed(b) : battle_self_debuffed(b);
+        mul = debuffed ? 2.0f : 1.0f;
+        atk = caster->spc;
+        def = from_player ? (b->foe.spc + b->mods_foe_spc) : (b->pl.spc + b->mods_self_spc);
+        dmg = jground((11.0f + (float)atk * 0.75f - (float)def * 0.18f) * mul + (float)irand(0, 2));
+        if(dmg < 1) dmg = 1;
+        n = s_cat(label, 0, debuffed ? "MANA SURGE  2X" : "MANA SURGE");
+    }
+    label[n] = 0;
+    { int i; for(i = 0; label[i]; i++) out_label[i] = label[i]; out_label[i] = 0; }
+    *out_dmg = dmg;
+    return 1;
 }
 
 static void battle_apply_hit(Battle *b) {
@@ -1623,8 +1681,9 @@ static void battle_apply_hit(Battle *b) {
     b->msg_n = 2; b->msg_i = 0; b->phase = 0; b->after = BAFTER_GUARD;
 }
 
-/* pickAtk's basic-move branch (Cathleen's spell branch isn't ported --
-   see the section comment above). */
+/* pickAtk's basic-move branch. Only reached for a non-spellcaster
+   lead -- see battle_pick_spell() further down for Cathleen's own
+   branch, dispatched separately in main()'s battle-phase-2 handling. */
 static void battle_pick_basic(Battle *b) {
     int atk = b->pl.str + b->mods_self_str;
     int def = b->foe.str + b->mods_foe_str;
@@ -1664,6 +1723,24 @@ static void battle_pick_special(Battle *b) {
     battle_apply_hit(b);
 }
 
+/* pickAttack()'s spell branch: for a Cathleen lead, every attack-menu
+   row is a direct spell cast (no minigame, no separate guard row --
+   her attackMenu() is just her 4 spell names, matching data.ts). Does
+   nothing if the row was Mana Surge with no PP left, same as
+   castSpell()'s early return (the message/phase change that produces
+   is handled by the caller, matching pickAttack's own silent-return
+   there). */
+static int battle_pick_spell(Battle *b, int spell_id) {
+    int dmg;
+    char label[40];
+    if(!battle_cast_spell(b, spell_id, 1, &dmg, label))
+        return 0;
+    b->dmg = dmg;
+    { int i; for(i = 0; label[i]; i++) b->label[i] = label[i]; b->label[i] = 0; }
+    battle_apply_hit(b);
+    return 1;
+}
+
 /* pickGuard(): the foe picks its own move (28% chance of its special
    if it has spp left, otherwise basic), the player's chosen guard is
    checked against a stat-difference success chance, and damage scales
@@ -1676,11 +1753,44 @@ static void battle_pick_special(Battle *b) {
 static void battle_pick_guard(Battle *b, int kind, Monster *party, int party_n, int *lead) {
     const Species *foe_sp = &SPECIES[b->foe.species];
     int use_special = b->foe.spp > 0 && irand(0, 99) < 28;
+    char move_name_buf[40];
     const char *move_name;
     float base;
     int atk_stat, def_stat, chance, success, dmg;
     char line[40];
     int n = 0;
+
+    /* resolve_guard()'s spell branch: Cathleen never uses the plain
+       basic/special ladder below, she casts one of her 4 spells
+       instead (weighted toward Mana Surge when the player is already
+       debuffed, same 55% roll as the reference). atkStat/base still
+       come from this branch's `base` alone -- the reference's own
+       atkStat calculation for the guard-chance formula, further down,
+       is untouched by this branch and keeps using the basic-move
+       formula even for a spellcaster, a quirk of resolve_guard()
+       ported here verbatim rather than "fixed". */
+    if(foe_sp->spells_n > 0) {
+        static const char *const SPELL_PLAIN_NAME[4] = {
+            "FIRE BOLT", "ICE BEAM", "LIGHTNING STRIKE", "MANA SURGE"
+        };
+        int idx = irand(0, foe_sp->spells_n > 3 ? 2 : foe_sp->spells_n - 1);
+        int spell_id = foe_sp->spells[idx];
+        if(battle_self_debuffed(b) && b->foe.spp > 0 && irand(0, 99) < 55)
+            spell_id = SPELL_MANASURGE;
+        if(battle_cast_spell(b, spell_id, 0, &dmg, move_name_buf)) {
+            move_name = move_name_buf;
+        }
+        else {
+            /* castSpell()'s spent-PP Mana Surge fallback: "?? { dmg: 1,
+               label: spell.name }" -- only reachable here since the
+               plain elemental spells never fail this check. */
+            dmg = 1;
+            move_name = SPELL_PLAIN_NAME[spell_id];
+        }
+        base = (float)dmg;
+        atk_stat = b->foe.str + b->mods_foe_str;
+        goto guard_chance;
+    }
 
     if(use_special) b->foe.spp--;
     move_name = use_special ? foe_sp->special : foe_sp->basic;
@@ -1696,6 +1806,7 @@ static void battle_pick_guard(Battle *b, int kind, Monster *party, int party_n, 
                     - (float)(b->pl.str + b->mods_self_str) * 0.15f;
     }
 
+guard_chance:
     if(kind == 0)      def_stat = b->pl.agl + b->mods_self_agl;
     else if(kind == 1) def_stat = b->pl.str + b->mods_self_str;
     else               def_stat = b->pl.spc + b->mods_self_spc;
@@ -2120,14 +2231,42 @@ static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
     return i; /* row count, for input handling to map kinds <-> cursor */
 }
 
+/* attackMenu(): a spellcaster lead's attack menu is just their spell
+   names (4 rows for Cathleen, PP shown only next to Mana Surge, the
+   one with a pp cost -- matches data.ts's spells[].pp flag), no
+   basic/special/wait rows at all. */
 static void draw_battle_atk_menu(const Battle *b, int cur) {
     int y = BCONTENT_Y + 8;
     char buf[32];
     int n;
+    const Species *s = &SPECIES[b->pl.species];
 
-    draw_battle_menu_row(SPECIES[b->pl.species].basic, 0, cur, y); y += MENU_ROW_H;
+    if(s->spells_n > 0) {
+        static const char *const SPELL_MENU_NAME[4] = {
+            "FIRE BOLT", "ICE BEAM", "LIGHTNING STRIKE", "MANA SURGE"
+        };
+        int i;
+        for(i = 0; i < s->spells_n; i++) {
+            if(s->spells[i] == SPELL_MANASURGE) {
+                n = s_cat(buf, 0, SPELL_MENU_NAME[s->spells[i]]);
+                n = s_cat(buf, n, " ");
+                n = s_cat_uint(buf, n, b->pl.spp);
+                n = s_cat(buf, n, "/");
+                n = s_cat_uint(buf, n, b->pl.sppMax);
+                buf[n] = 0;
+                draw_battle_menu_row(buf, i, cur, y);
+            }
+            else {
+                draw_battle_menu_row(SPELL_MENU_NAME[s->spells[i]], i, cur, y);
+            }
+            y += MENU_ROW_H;
+        }
+        return;
+    }
 
-    n = s_cat(buf, 0, SPECIES[b->pl.species].special);
+    draw_battle_menu_row(s->basic, 0, cur, y); y += MENU_ROW_H;
+
+    n = s_cat(buf, 0, s->special);
     n = s_cat(buf, n, " ");
     n = s_cat_uint(buf, n, b->pl.spp);
     n = s_cat(buf, n, "/");
@@ -2750,7 +2889,9 @@ void main(void) {
                 }
             }
             else {
-                int n_rows = (battle.phase == 1) ? battle_item_menu_count(&bag) : 3;
+                int n_rows = (battle.phase == 1) ? battle_item_menu_count(&bag)
+                             : (battle.phase == 2 && SPECIES[battle.pl.species].spells_n > 0)
+                                 ? SPECIES[battle.pl.species].spells_n : 3;
 
                 if(up_now && !prev_up)
                     battle.cur = (battle.cur - 1 + n_rows) % n_rows;
@@ -2766,6 +2907,23 @@ void main(void) {
                     if(battle.phase == 1) {
                         int kind = battle_item_menu_kind(&bag, battle.cur);
                         battle_pick_item(&battle, &bag, kind, party, &party_n, lead);
+                    }
+                    else if(battle.phase == 2 && SPECIES[battle.pl.species].spells_n > 0) {
+                        /* pickAttack()'s spell branch: every row casts
+                           directly, no minigame, no guard/wait row at
+                           all -- a Cathleen lead's attack menu is only
+                           ever her 4 spells (see draw_battle_atk_menu). */
+                        int spell_id = SPECIES[battle.pl.species].spells[battle.cur];
+                        if(battle_pick_spell(&battle, spell_id))
+                            party[lead] = battle.pl;
+                        else {
+                            int n = s_cat(battle.msg[0], 0, "MANA SURGE IS SPENT");
+                            battle.msg[0][n] = 0;
+                            battle.msg_n = 1;
+                            battle.msg_i = 0;
+                            battle.phase = 0;
+                            battle.after = BAFTER_ATK;
+                        }
                     }
                     else if(battle.phase == 2) {
                         if(battle.cur == 0) {
