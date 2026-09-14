@@ -172,6 +172,32 @@ static void vram_clear(void) {
         draw_fb[i] = 0x0000;
 }
 
+/* Screen fade to/from black (bed heal, a party wipe teleporting home
+   -- see main()'s fade_state machine). There's no alpha channel to
+   composite with here, so this darkens whatever was already drawn
+   into draw_fb this frame, in place, as the very last step before
+   fb_flip -- level is 0 (untouched) to FADE_STEPS (fully black).
+   FADE_STEPS is a power of 2 so the per-channel scale is a multiply
+   + shift, not a divide, cheap enough to run over all 76800 pixels
+   every frame a fade is in progress. */
+#define FADE_STEPS 16
+static void apply_fade(int level) {
+    u32 i, keep;
+    if(level <= 0) return;
+    if(level >= FADE_STEPS) {
+        vram_clear();
+        return;
+    }
+    keep = (u32)(FADE_STEPS - level);
+    for(i = 0; i < (u32)SCREEN_W * SCREEN_H; i++) {
+        u16 c = draw_fb[i];
+        u16 r = (u16)(((u32)((c >> 11) & 0x1Fu) * keep) >> 4);
+        u16 g = (u16)(((u32)((c >> 5) & 0x3Fu) * keep) >> 4);
+        u16 b = (u16)(((u32)(c & 0x1Fu) * keep) >> 4);
+        draw_fb[i] = (u16)((r << 11) | (g << 5) | b);
+    }
+}
+
 static void put_pixel(int x, int y, u16 color) {
     if(x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H)
         return;
@@ -723,12 +749,18 @@ static const Map MAPS[5] = {
     { map_camp_rows,   16, 10 },
 };
 
-/* data.lua's SOLID_SET, verbatim: "#HWRBC^NKEVAQXUJI". D (door), S
-   (shelf) and the digit/letter NPC marks are deliberately absent --
-   doors must be walkable to trigger a warp, and marks are interacted
-   with by proximity, not blocked by collision. */
+/* data.lua's own SOLID_SET is "#HWRBC^NKEVAQXUJI" -- extended here so
+   every in-game object actually blocks movement, not just the ones
+   the reference happened to mark solid: S (shelf), M (herb), G (gem),
+   L (stump) are all physical objects on the ground, and 8/9
+   (Cathleen/Shinigami) were plain walk-through tiles despite being
+   NPCs like every other letter mark, which already are solid. Doors
+   (D/F) stay deliberately walkable -- they need to be, to trigger a
+   warp -- and every mark, solid or not, is still interacted with by
+   proximity (near_mark/closest_mark), never by standing on the exact
+   tile, so making these solid doesn't block reaching them. */
 static int tile_is_solid(char ch) {
-    static const char *const solid = "#HWRBC^NKEVAQXUJI";
+    static const char *const solid = "#HWRBC^NKEVAQXUJISMGL89";
     const char *p;
     for(p = solid; *p; p++)
         if(*p == ch)
@@ -1149,14 +1181,6 @@ static const char *const TALK_CAMP_LEAVE[] = {
     "BACK TOWARD CALDER'S GROUND.",
 };
 
-/* state.lua's bAfter==7 loss handler: "Max" / "We still breathe. Crawl
-   back." shown as a plain world message once the battle itself has
-   already ended (matches say1(G, "Max", ...) running after G.mode is
-   set back to MODE.WORLD). */
-static const char *const TALK_LOSS[] = {
-    "WE STILL BREATHE. CRAWL BACK.",
-};
-
 /* Remaining data.TALK entries: the VELD/FOREST/GROVE NPCs, Mason,
    Anne, and Bram's shop-open line. Ported verbatim except upper-cased,
    same as every TALK_* array above. */
@@ -1171,6 +1195,16 @@ static const char *const TALK_MASON_AFTER[] = {
 };
 static const char *const TALK_MASON_WIN[] = {
     "MASON SPITS IN THE DIRT. THE PATH IS YOURS. CALDER STILL WAITS SOUTH.",
+};
+/* Mason's rematch, ambush dialogue -- see main()'s mason2_* state and
+   the world-actors section comment for the full trigger chain. */
+static const char *const TALK_MASON_FIGHT2[] = {
+    "YOU. AGAIN.",
+    "I TRAINED SINCE CALDER FELL. THREE CRYMON THIS TIME.",
+    "NO MERCY NOW.",
+};
+static const char *const TALK_MASON_WIN2[] = {
+    "MASON KNEELS. THREE DOWN. HE HAS NOTHING LEFT TO PROVE.",
 };
 static const char *const TALK_WREN_FIRST[] = {
     "TOO YOUNG. TAKE THE SALVE. CALDER CAMPS SOUTH.",
@@ -1542,6 +1576,16 @@ static int grant_xp(Monster *m, int foe_lv) {
     return grew;
 }
 
+/* fullHeal(), also used by the bed and by a party wipe's fade-and-
+   teleport-home (see main()'s FADE_ACTION_BED/FADE_ACTION_LOSS). */
+static void heal_party(Monster *party, int party_n) {
+    int i;
+    for(i = 0; i < party_n; i++) {
+        party[i].hp = party[i].maxHp;
+        party[i].spp = party[i].sppMax;
+    }
+}
+
 /* data.captureChance: 5% per foe agility, +1% per % of foe HP
    missing, +25% if any foe stat has been lowered this fight. */
 static int capture_chance(int agl, int hp, int max_hp, int vulnerable) {
@@ -1710,6 +1754,7 @@ typedef struct {
 #define TRAINER_MASON    2
 #define TRAINER_SHINIGAMI 3
 #define TRAINER_CALDER   4
+#define TRAINER_MASON2   5
 
 #define BAFTER_ITEM      1
 #define BAFTER_ATK       2
@@ -1817,11 +1862,12 @@ static void battle_apply_hit(Battle *b) {
 
     if(b->foe.hp <= 0) {
         if(b->bench_n > 0) {
-            /* Shinigami's fight only -- the sole nbench > 0 case in
-               data.lua. Grants XP for the fallen bench member (unlike
-               the final win, which grants XP once the whole fight
-               ends), swaps the next bench monster in, and clears the
-               foe-side stat mods, matching applyHit's bench branch. */
+            /* Shinigami's fight, and now Mason's rematch too -- the
+               two nbench > 0 fights. Grants XP for the fallen bench
+               member (unlike the final win, which grants XP once the
+               whole fight ends), swaps the next bench monster in, and
+               clears the foe-side stat mods, matching applyHit's
+               bench branch. */
             char fallen[24];
             int fn = s_cat(fallen, 0, SPECIES[b->foe.species].name);
             fallen[fn] = 0;
@@ -1837,7 +1883,8 @@ static void battle_apply_hit(Battle *b) {
             n = s_cat(b->msg[1], n, " FALLS");
             b->msg[1][n] = 0;
 
-            n = s_cat(b->msg[2], 0, "SHINIGAMI SENDS ");
+            n = s_cat(b->msg[2], 0,
+                      b->trainer_kind == TRAINER_MASON2 ? "MASON SENDS " : "SHINIGAMI SENDS ");
             n = s_cat(b->msg[2], n, SPECIES[b->foe.species].name);
             b->msg[2][n] = 0;
 
@@ -2943,6 +2990,26 @@ void main(void) {
     int hud_t = 0;
 #define HUD_NOTE_FRAMES 720
 
+    /* Screen fade (bed heal, a party wipe teleporting home): 0 idle,
+       1 fading to black, 2 holding one black frame while fade_action
+       actually happens (teleport/heal, so it's never visible mid-
+       transition), 3 fading back in. Runs as a straight post-process
+       over whatever's drawn each frame (apply_fade(), called at the
+       very end of the draw dispatch below), so it doesn't care
+       whether the world or the battle screen is underneath it, and
+       ticks/draws every frame regardless of state/in_battle --
+       world movement and battle input are the only things gated on
+       fade_state == 0 (see their own gates further down). */
+    int fade_state = 0;
+    int fade_timer = 0;
+    int fade_action = 0;
+#define FADE_NONE        0
+#define FADE_OUT         1
+#define FADE_HOLD        2
+#define FADE_IN          3
+#define FADE_ACTION_BED  1
+#define FADE_ACTION_LOSS 2
+
     /* Active dialogue sequence: seq_lines/seq_len name the current
        TALK_* array, seq_beat indexes into it. seq_lines == 0 means no
        dialogue is showing. post_action fires once the sequence
@@ -2961,6 +3028,8 @@ void main(void) {
 #define POST_MASON_LEAVE 7
 #define POST_ANNE_LEAVE  8
 #define POST_ENDING_WIN  9
+#define POST_BED_HEAL    10
+#define POST_MASON2      11
 
     /* World NPC/pickup flags, matching state.lua's G.talkedWren etc.
        (see the world-NPC section comment above for what's ported vs
@@ -2981,6 +3050,17 @@ void main(void) {
     float mason_x = 0.0f, mason_y = 0.0f;
     int mason_dir = 0;
     float mason_anim = 0.0f;
+    int mason_rematch = 0; /* which loadout/dialogue the next ambush uses */
+
+    /* Mason's rematch: once he's beaten AND Calder's beaten (the
+       player has cleared the main VELD gauntlet), he reappears on a
+       random open-world map, force-walks up and ambushes the player
+       exactly like the first encounter (reusing the same mason_state
+       machine, just with mason_rematch=1 picking a 3-CryMon loadout
+       and different dialogue) the moment they set foot on that map.
+       mason2_map is rolled once, right when beat_calder flips to 1. */
+    int mason2_map = -1;
+    int mason2_done = 0;
 
     /* Anne: engine.ts's maybeStartAnne() gate is battlesDone>=1 while
        on VELD (onBattleOver()/battlesDone++ fires on soldier, Mason,
@@ -3035,6 +3115,47 @@ void main(void) {
         left_now  = pressed(raw, CONT_DPAD_LEFT);
         right_now = pressed(raw, CONT_DPAD_RIGHT);
 
+        /* Fade tick: runs every frame regardless of state/menu/battle
+           (world movement and battle input are what gate on
+           fade_state == 0, not this). FADE_HOLD is exactly one frame
+           -- just long enough that apply_fade() below draws one fully
+           black frame with the teleport/heal already applied, so
+           neither the old nor the new scene is ever visible
+           mid-transition. */
+        if(fade_state == FADE_OUT) {
+            fade_timer++;
+            if(fade_timer >= FADE_STEPS) {
+                fade_state = FADE_HOLD;
+                fade_timer = 0;
+            }
+        }
+        else if(fade_state == FADE_HOLD) {
+            if(fade_action == FADE_ACTION_BED) {
+                heal_party(party, party_n);
+            }
+            else if(fade_action == FADE_ACTION_LOSS) {
+                heal_party(party, party_n);
+                map_id = MAP_HOUSE;
+                find_mark(MAP_HOUSE, 'U', &col, &row);
+                px = (col + 1) * TILE + TILE / 2;
+                py = row * TILE + TILE / 2;
+                pdir = 1; /* facing up, toward the bed */
+                last_tx = -1;
+                last_ty = -1;
+                door_lock = 20;
+            }
+            fade_state = FADE_IN;
+            fade_timer = 0;
+        }
+        else if(fade_state == FADE_IN) {
+            fade_timer++;
+            if(fade_timer >= FADE_STEPS) {
+                fade_state = FADE_NONE;
+                fade_timer = 0;
+                fade_action = 0;
+            }
+        }
+
         if(state == 0) {
             if(start_now && !prev_start) {
                 /* resetRun(): every run-scoped variable back to its
@@ -3071,6 +3192,7 @@ void main(void) {
                 beat_calder = beat_mason = beat_shin = cath_caught = 0;
                 soldier_beaten[0] = soldier_beaten[1] = soldier_beaten[2] = 0;
                 mason_state = 0; mason_x = mason_y = 0.0f; mason_dir = 0; mason_anim = 0.0f;
+                mason_rematch = 0; mason2_map = -1; mason2_done = 0;
                 battles = 0;
                 anne_state = 0; anne_x = anne_y = 0.0f; anne_dir = 0; anne_anim = 0.0f;
                 anne_gifted = 0;
@@ -3152,6 +3274,23 @@ void main(void) {
                                     seq_lines = TALK_CALDER_WIN;
                                     seq_len = TALK_LEN(TALK_CALDER_WIN);
                                     seq_beat = 0;
+                                    /* Mason's rematch unlocks the
+                                       moment Calder's beaten -- rolled
+                                       once here, not re-rolled if the
+                                       player revisits this map again.
+                                       Not gated on beat_mason: his
+                                       first ambush is practically
+                                       unavoidable (he force-walks up
+                                       the moment you leave the house),
+                                       so this never actually fires
+                                       without it, but nothing here
+                                       depends on it having happened
+                                       either. */
+                                    if(!mason2_done && mason2_map < 0) {
+                                        static const int MASON2_MAPS[3] =
+                                            { MAP_VELD, MAP_FOREST, MAP_GROVE };
+                                        mason2_map = MASON2_MAPS[irand(0, 2)];
+                                    }
                                 }
                                 else if(battle.trainer_kind == TRAINER_SOLDIER) {
                                     soldier_beaten[battle.soldier_id] = 1;
@@ -3172,6 +3311,23 @@ void main(void) {
                                     seq_lines = TALK_MASON_WIN;
                                     seq_len = TALK_LEN(TALK_MASON_WIN);
                                     seq_beat = 0;
+                                }
+                                else if(battle.trainer_kind == TRAINER_MASON2) {
+                                    /* No standing/re-interact step this
+                                       time (unlike the first fight) --
+                                       he leaves the instant this
+                                       closes, via the same
+                                       POST_MASON_LEAVE the first
+                                       encounter's re-interact uses. */
+                                    mason2_done = 1;
+                                    marks += 20;
+                                    battles++;
+                                    in_battle = 0;
+                                    enc_lock = 3;
+                                    seq_lines = TALK_MASON_WIN2;
+                                    seq_len = TALK_LEN(TALK_MASON_WIN2);
+                                    seq_beat = 0;
+                                    post_action = POST_MASON_LEAVE;
                                 }
                                 else if(battle.trainer_kind == TRAINER_SHINIGAMI) {
                                     beat_shin = 1;
@@ -3237,17 +3393,21 @@ void main(void) {
                                 in_battle = 0;
                                 enc_lock = 3;
                                 break;
-                            case BAFTER_LOSS: {
-                                int revived = party[lead].maxHp * 2 / 5;
-                                if(revived < 1) revived = 1;
-                                party[lead].hp = revived;
+                            case BAFTER_LOSS:
+                                /* Every party CryMon is at 0 HP (the
+                                   only way battle_pick_guard ever
+                                   reaches BAFTER_LOSS -- no living
+                                   member left to jump in). Fades to
+                                   black, teleports home next to the
+                                   bed, fully heals the whole party,
+                                   fades back in -- see FADE_ACTION_LOSS
+                                   in the draw dispatch below. */
                                 in_battle = 0;
                                 enc_lock = 3;
-                                seq_lines = TALK_LOSS;
-                                seq_len = TALK_LEN(TALK_LOSS);
-                                seq_beat = 0;
+                                fade_state = FADE_OUT;
+                                fade_timer = 0;
+                                fade_action = FADE_ACTION_LOSS;
                                 break;
-                            }
                             default:
                                 break;
                         }
@@ -3443,6 +3603,25 @@ void main(void) {
                 anne_anim = 0.0f;
             }
 
+            /* Mason's rematch: fires the instant the player sets foot
+               on mason2_map (rolled once, back at the Calder win --
+               see there), reusing the exact same mason_state machine
+               as his first ambush (approach -> ambush -> standing ->
+               leave), just with mason_rematch=1 so the ambush trigger
+               further down picks TALK_MASON_FIGHT2/POST_MASON2's
+               3-CryMon loadout instead. Guarded on mason_state == 0
+               so it can't retrigger while he's already approaching/
+               standing/leaving from this same rematch. */
+            if(mason2_map >= 0 && !mason2_done && mason_state == 0 &&
+               map_id == mason2_map && !seq_lines) {
+                mason_state = 1;
+                mason_rematch = 1;
+                mason_x = (float)px;
+                mason_y = (float)py + 100.0f;
+                mason_dir = 1; /* up */
+                mason_anim = 0.0f;
+            }
+
             /* ensureSoldiers(): lazily place the 3 FOREST soldiers at
                their patrol-origin marks the first time the map is
                entered, matching engine.ts's own lazy build. */
@@ -3479,10 +3658,17 @@ void main(void) {
                 float dist = f_sqrt(dx * dx + dy * dy);
                 if(dist < ACTOR_REACH_DIST) {
                     mason_state = 2;
-                    seq_lines = TALK_MASON_FIGHT;
-                    seq_len = TALK_LEN(TALK_MASON_FIGHT);
+                    if(mason_rematch) {
+                        seq_lines = TALK_MASON_FIGHT2;
+                        seq_len = TALK_LEN(TALK_MASON_FIGHT2);
+                        post_action = POST_MASON2;
+                    }
+                    else {
+                        seq_lines = TALK_MASON_FIGHT;
+                        seq_len = TALK_LEN(TALK_MASON_FIGHT);
+                        post_action = POST_MASON;
+                    }
                     seq_beat = 0;
-                    post_action = POST_MASON;
                 }
                 else {
                     mason_x += dx / dist * ACTOR_SPD_APPROACH;
@@ -3574,7 +3760,7 @@ void main(void) {
                 }
             }
 
-            if(!seq_lines && hud_t <= 0 && mason_state != 1 && anne_state != 1) {
+            if(!seq_lines && hud_t <= 0 && fade_state == FADE_NONE && mason_state != 1 && anne_state != 1) {
                 int dx = 0, dy = 0;
                 int map_w = MAPS[map_id].cols * TILE;
                 int map_h = MAPS[map_id].rows_n * TILE;
@@ -3726,7 +3912,7 @@ void main(void) {
                 }
             }
 
-            if(a_now && !prev_a && !hud_dismissed_now) {
+            if(a_now && !prev_a && !hud_dismissed_now && fade_state == FADE_NONE) {
                 if(seq_lines) {
                     /* Advance to the next beat; close the box (and
                        fire any queued post_action -- beginTalkEnd())
@@ -3743,7 +3929,7 @@ void main(void) {
                            branch has no such check). */
                         if(party_n > 0 || post_action == POST_SHOP ||
                            post_action == POST_MASON_LEAVE || post_action == POST_ANNE_LEAVE ||
-                           post_action == POST_ENDING_WIN) {
+                           post_action == POST_ENDING_WIN || post_action == POST_BED_HEAL) {
                             switch(post_action) {
                                 case POST_CALDER:
                                     battle.foe = mint_monster(SP_RAZORBAT, 4);
@@ -3775,6 +3961,30 @@ void main(void) {
                                     battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
                                     battle.pl_poisoned = battle.foe_poisoned = 0;
                                     battle.bench_n = 0;
+                                    battle.grew = 0;
+                                    battle.pl = party[lead];
+                                    in_battle = 1;
+                                    break;
+                                case POST_MASON2:
+                                    /* Rematch: 3 CryMon back to back
+                                       (Shinigami's bench mechanic,
+                                       reused), all higher level than
+                                       the lv3 Glimmoth he opened with
+                                       the first time. */
+                                    battle.foe = mint_monster(SP_GLIMMOTH, 6);
+                                    battle.wild = 0;
+                                    battle.trainer_kind = TRAINER_MASON2;
+                                    battle.phase = 0;
+                                    { int n = s_cat(battle.msg[0], 0, "MASON SENDS GLIMMOTH");
+                                      battle.msg[0][n] = 0; }
+                                    battle.msg_n = 1; battle.msg_i = 0; battle.after = BAFTER_ITEM;
+                                    battle.cur = 0;
+                                    battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
+                                    battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
+                                    battle.bench[0] = mint_monster(SP_BRIARFOX, 7);
+                                    battle.bench[1] = mint_monster(SP_DUSKHORN, 8);
+                                    battle.bench_n = 2;
                                     battle.grew = 0;
                                     battle.pl = party[lead];
                                     in_battle = 1;
@@ -3866,6 +4076,11 @@ void main(void) {
                                     ending_mode = 1;
                                     ending_i = 0;
                                     break;
+                                case POST_BED_HEAL:
+                                    fade_state = FADE_OUT;
+                                    fade_timer = 0;
+                                    fade_action = FADE_ACTION_BED;
+                                    break;
                                 default:
                                     break;
                             }
@@ -3888,6 +4103,7 @@ void main(void) {
                         case 'U':
                             seq_lines = TALK_BED;
                             seq_len = TALK_LEN(TALK_BED);
+                            post_action = POST_BED_HEAL;
                             break;
                         case 'B':
                             if(got_shelf) {
@@ -4141,8 +4357,16 @@ void main(void) {
                     }
                 }
                 else if(map_id == MAP_GROVE) {
-                    /* Cathleen (mark '8') and Shinigami (mark '9'). */
-                    if(near_mark(map_id, '9', px, py, 2704)) {
+                    /* Cathleen (mark '8') and Shinigami (mark '9').
+                       676 (26px, roughly one tile) matches every other
+                       mark's radius -- interacting should require
+                       actually touching the NPC, from any angle
+                       (near_mark is a plain radius check, no facing
+                       requirement), not being loosely nearby. Both are
+                       solid now too (tile_is_solid's extended set), so
+                       676 is also about as close as collision alone
+                       would ever let the player get. */
+                    if(near_mark(map_id, '9', px, py, 676)) {
                         if(beat_shin) {
                             seq_lines = TALK_SHINIGAMI_DONE;
                             seq_len = TALK_LEN(TALK_SHINIGAMI_DONE);
@@ -4154,13 +4378,13 @@ void main(void) {
                         }
                         seq_beat = 0;
                     }
-                    else if(!cath_caught && near_mark(map_id, '8', px, py, 2704)) {
+                    else if(!cath_caught && near_mark(map_id, '8', px, py, 676)) {
                         seq_lines = TALK_CATHLEEN_SPOT;
                         seq_len = TALK_LEN(TALK_CATHLEEN_SPOT);
                         post_action = POST_CATHLEEN;
                         seq_beat = 0;
                     }
-                    else if(cath_caught && near_mark(map_id, '8', px, py, 1600)) {
+                    else if(cath_caught && near_mark(map_id, '8', px, py, 676)) {
                         seq_lines = TALK_CATHLEEN_GONE;
                         seq_len = TALK_LEN(TALK_CATHLEEN_GONE);
                         seq_beat = 0;
@@ -4182,7 +4406,7 @@ void main(void) {
             /* Menu open, only from plain world state (state.lua only
                reaches selectPressed()/startPressed() outside TALK/
                BATTLE/etc, which here just means no dialogue active). */
-            if(!seq_lines) {
+            if(!seq_lines && fade_state == FADE_NONE) {
                 if(y_now && !prev_y)
                     menu_mode = 1;
                 else if(start_now && !prev_start)
@@ -4229,6 +4453,15 @@ void main(void) {
             if(shop_open)
                 draw_shop(&bag, marks, shop_sell_tab, shop_cur);
         }
+
+        /* Post-process over whatever was just drawn, whatever it was
+           -- see the fade_state comment up at its declaration. */
+        if(fade_state == FADE_OUT)
+            apply_fade(fade_timer);
+        else if(fade_state == FADE_HOLD)
+            apply_fade(FADE_STEPS);
+        else if(fade_state == FADE_IN)
+            apply_fade(FADE_STEPS - fade_timer);
 
         prev_start = start_now;
         prev_b = b_now;
