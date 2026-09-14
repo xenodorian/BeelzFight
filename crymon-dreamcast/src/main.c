@@ -571,6 +571,7 @@ static int pressed(u16 raw, u16 mask) {
 #define MAP_VELD   1
 #define MAP_FOREST 2
 #define MAP_GROVE  3
+#define MAP_CAMP   4
 
 typedef struct {
     const char *const *rows;
@@ -612,6 +613,7 @@ static const char *const map_veld_rows[] = {
     "##............===............#",
     "##...........=====.....NNNN..#",
     "##............===.......NE...#",
+    "##............=F=............#",
     "###...........===...........##",
     "#############=Z=##############",
 };
@@ -663,11 +665,36 @@ static const char *const map_grove_rows[] = {
     "##########################",
 };
 
-static const Map MAPS[4] = {
+/* CryTown's front-line camp -- the place NPC dialogue names repeatedly
+   ("the camp takes strays", "south is the camp", "camp took my
+   Crymon", the cart's camp letter) but that never existed as an
+   actual location: Calder's own fight was the closest thing to it,
+   standing at the edge of VELD guarding the way south. Gated behind
+   beating him (VELD's new 'F' door tile, tile_blocked() below), so
+   the geography now matches what everyone's been saying: you cannot
+   reach the camp until Calder's out of the way. The camp commander
+   (mark 'I', reusing the soldier sprite -- there's no dedicated
+   commander art) is what used to instantly show ENDING_WIN the moment
+   Calder fell; see POST_ENDING_WIN further down. */
+static const char *const map_camp_rows[] = {
+    "################",
+    "#######D########",
+    "#..............#",
+    "#..H........H..#",
+    "#..H........H..#",
+    "#..............#",
+    "#......I.......#",
+    "#..............#",
+    "#..H........H..#",
+    "################",
+};
+
+static const Map MAPS[5] = {
     { map_house_rows,  14, 11 },
-    { map_veld_rows,   30, 22 },
+    { map_veld_rows,   30, 23 },
     { map_forest_rows, 26, 20 },
     { map_grove_rows,  26, 21 },
+    { map_camp_rows,   16, 10 },
 };
 
 /* data.lua's SOLID_SET, verbatim: "#HWRBC^NKEVAQXUJI". D (door), S
@@ -689,9 +716,10 @@ static int tile_is_solid(char ch) {
    collision check itself until Cathleen is caught -- now that
    Cathleen is a real, catchable GROVE fight in this port, this gate
    is ported too instead of staying an open door. */
-static int tile_blocked(int map_id, char ch, int cath_caught) {
+static int tile_blocked(int map_id, char ch, int cath_caught, int beat_calder) {
     if(tile_is_solid(ch)) return 1;
     if(map_id == MAP_GROVE && ch == 'D' && !cath_caught) return 1;
+    if(map_id == MAP_VELD && ch == 'F' && !beat_calder) return 1;
     return 0;
 }
 
@@ -989,6 +1017,11 @@ static void draw_npcs(int map_id, int cam_x, int cam_y, u32 frame_count,
         if(!cath_caught)
             draw_npc(map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H, cam_x, cam_y);
     }
+    else if(map_id == MAP_CAMP) {
+        /* No dedicated commander art -- reuses the soldier sprite
+           (down-facing, standing) since he's a camp officer too. */
+        draw_npc(map_id, 'I', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+    }
 }
 
 /* Player sprite, bottom-center anchored at (cx, cy) same as the
@@ -1081,6 +1114,13 @@ static const char *const TALK_GROVE_ENTER[] = {
 };
 static const char *const TALK_GROVE_LEAVE[] = {
     "BACK UNDER THE TREES.",
+};
+static const char *const TALK_CAMP_ENTER[] = {
+    "TENTS, COLD FIRES. THE CAMP AT LAST.",
+    "SOMEONE IS STILL HERE.",
+};
+static const char *const TALK_CAMP_LEAVE[] = {
+    "BACK TOWARD CALDER'S GROUND.",
 };
 
 /* state.lua's bAfter==7 loss handler: "Max" / "We still breathe. Crawl
@@ -1200,6 +1240,22 @@ static const char *const TALK_CALDER_AFTER[] = {
 static const char *const TALK_CALDER_FIGHT[] = {
     "THE CAMP TAKES STRAYS.",
     "I'M NOT STRAY.",
+};
+/* Shown once battle_finish_win() ends a Calder fight, replacing the
+   old instant cut to ENDING_WIN -- see MAP_CAMP's section comment.
+   BAFTER_ITEM (like every other trainer win message) returns to the
+   world once closed, no post_action needed here. */
+static const char *const TALK_CALDER_WIN[] = {
+    "CALDER FALLS. THE PATH SOUTH IS CLEAR.",
+    "THE CAMP WAITS.",
+};
+/* The camp commander (mark 'I' on MAP_CAMP): first visit queues
+   POST_ENDING_WIN, which shows ENDING_WIN once this closes -- the
+   real payoff every "the camp" line in this file was pointing at. */
+static const char *const TALK_CAMP_COMMANDER[] = {
+    "SO YOU'RE THE ONE WHO BEAT CALDER.",
+    "CRYTOWN SENDS AN EIGHT YEAR OLD. FINE.",
+    "TAKE THE ROAD BACK. THIS WAR ISN'T YOURS TO FINISH.",
 };
 static const char *const TALK_CATHLEEN_SPOT[] = {
     "YOU WALKED THE PATH. I AM THE PATH'S ANSWER.",
@@ -2765,6 +2821,7 @@ void main(void) {
 #define POST_SHOP        6
 #define POST_MASON_LEAVE 7
 #define POST_ANNE_LEAVE  8
+#define POST_ENDING_WIN  9
 
     /* World NPC/pickup flags, matching state.lua's G.talkedWren etc.
        (see the world-NPC section comment above for what's ported vs
@@ -2943,11 +3000,19 @@ void main(void) {
                                 battle_finish_win(&battle, party, lead);
 
                                 if(battle.trainer_kind == TRAINER_CALDER) {
+                                    /* No more instant cut to ENDING_WIN
+                                       -- see MAP_CAMP's section comment.
+                                       Beating him just opens VELD's 'F'
+                                       door; the camp commander further
+                                       south is what actually shows the
+                                       ending now. */
                                     beat_calder = 1;
                                     marks += 18;
-                                    ending_mode = 1;
-                                    ending_i = 0;
                                     in_battle = 0;
+                                    enc_lock = 3;
+                                    seq_lines = TALK_CALDER_WIN;
+                                    seq_len = TALK_LEN(TALK_CALDER_WIN);
+                                    seq_beat = 0;
                                 }
                                 else if(battle.trainer_kind == TRAINER_SOLDIER) {
                                     soldier_beaten[battle.soldier_id] = 1;
@@ -3397,13 +3462,13 @@ void main(void) {
                     /* hitActor(): a live NPC blocks movement like a
                        solid tile (see actor_blocks() above). */
                     if(dx != 0 && !tile_blocked(map_id, tile_at(map_id, (nx + (dx > 0 ? 6 : -6)) / TILE,
-                                                                 py / TILE), cath_caught) &&
+                                                                 py / TILE), cath_caught, beat_calder) &&
                        !actor_blocks(map_id, nx, py, mason_state, mason_x, mason_y,
                                      anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         px = nx;
                     }
                     if(dy != 0 && !tile_blocked(map_id, tile_at(map_id, px / TILE,
-                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught) &&
+                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught, beat_calder) &&
                        !actor_blocks(map_id, px, ny, mason_state, mason_x, mason_y,
                                      anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         py = ny;
@@ -3497,6 +3562,23 @@ void main(void) {
                         seq_len = TALK_LEN(TALK_GROVE_LEAVE);
                         seq_beat = 0;
                     }
+                    else if(map_id == MAP_VELD && here == 'F') {
+                        /* Gated on beat_calder by tile_blocked() above
+                           -- this tile is only walkable, and so only
+                           reachable, once he's out of the way. */
+                        do_warp(&map_id, &px, &py, &pdir, MAP_CAMP, 'D', 1);
+                        door_lock = 20;
+                        seq_lines = TALK_CAMP_ENTER;
+                        seq_len = TALK_LEN(TALK_CAMP_ENTER);
+                        seq_beat = 0;
+                    }
+                    else if(map_id == MAP_CAMP && here == 'D') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'F', 0);
+                        door_lock = 20;
+                        seq_lines = TALK_CAMP_LEAVE;
+                        seq_len = TALK_LEN(TALK_CAMP_LEAVE);
+                        seq_beat = 0;
+                    }
                 }
             }
 
@@ -3516,7 +3598,8 @@ void main(void) {
                            to opening the shop (beginTalkEnd's a==9
                            branch has no such check). */
                         if(party_n > 0 || post_action == POST_SHOP ||
-                           post_action == POST_MASON_LEAVE || post_action == POST_ANNE_LEAVE) {
+                           post_action == POST_MASON_LEAVE || post_action == POST_ANNE_LEAVE ||
+                           post_action == POST_ENDING_WIN) {
                             switch(post_action) {
                                 case POST_CALDER:
                                     battle.foe = mint_monster(SP_RAZORBAT, 4);
@@ -3629,6 +3712,10 @@ void main(void) {
                                     anne_state = 3;
                                     anne_dir = 0;
                                     anne_anim = 0.0f;
+                                    break;
+                                case POST_ENDING_WIN:
+                                    ending_mode = 1;
+                                    ending_i = 0;
                                     break;
                                 default:
                                     break;
@@ -3927,6 +4014,17 @@ void main(void) {
                     else if(cath_caught && near_mark(map_id, '8', px, py, 1600)) {
                         seq_lines = TALK_CATHLEEN_GONE;
                         seq_len = TALK_LEN(TALK_CATHLEEN_GONE);
+                        seq_beat = 0;
+                    }
+                }
+                else if(map_id == MAP_CAMP) {
+                    /* The camp commander (mark 'I'): the payoff for
+                       every "the camp" line elsewhere in this file --
+                       see MAP_CAMP's section comment. */
+                    if(near_mark(map_id, 'I', px, py, 676)) {
+                        seq_lines = TALK_CAMP_COMMANDER;
+                        seq_len = TALK_LEN(TALK_CAMP_COMMANDER);
+                        post_action = POST_ENDING_WIN;
                         seq_beat = 0;
                     }
                 }
