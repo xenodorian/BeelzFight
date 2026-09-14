@@ -1,30 +1,32 @@
-# Requires a built KallistiOS (KOS) environment sourced first:
-#   . /path/to/kallistios/environ.sh
-# and mkdcdisc (https://gitlab.com/simulant/mkdcdisc) on PATH for `make cdi`.
+CC      = sh-elf-gcc
+AS      = sh-elf-gcc
+LD      = sh-elf-gcc
+OBJCOPY = sh-elf-objcopy
 
-TARGET = crymon.elf
-OBJS   = src/main.o src/align_compat.o
+ARCHFLAGS = -m4-single-only -ml
+CFLAGS    = $(ARCHFLAGS) -O2 -fno-builtin -ffreestanding -fomit-frame-pointer \
+            -Wall -Wextra -nostdlib -nostartfiles -nodefaultlibs
+LDFLAGS   = $(ARCHFLAGS) -nostdlib -nostartfiles -nodefaultlibs -T dc.ld -Wl,--build-id=none
 
-all: rm-elf $(TARGET)
+OBJS = src/start.o src/main.o
 
-include $(KOS_BASE)/Makefile.rules
+all: crymon.elf
 
-clean: rm-elf
-	-rm -f $(OBJS)
+src/start.o: src/start.S
+	$(AS) $(ARCHFLAGS) -c -o $@ $<
 
-rm-elf:
-	-rm -f $(TARGET)
+src/main.o: src/main.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-# -Wl,--allow-multiple-definition: this stock sh-elf-gcc's newlib was
-# built with its own __exit/_errno (lib_a-syscalls.o), which KOS's own
-# newlib_exit.o etc. duplicate; dc-chain's patched newlib omits its own
-# copies for exactly this reason. Harmless here since KOS's definitions
-# (linked first) are the ones we want kept.
-$(TARGET): $(OBJS)
-	kos-cc -o $(TARGET) $(OBJS) -Wl,--allow-multiple-definition
+crymon.elf: $(OBJS) dc.ld
+	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
-cdi: $(TARGET)
-	mkdcdisc -e $(TARGET) -o crymon.cdi -n "CryMon" -a "BeelzFight" \
+# Requires mkdcdisc (https://gitlab.com/simulant/mkdcdisc) on PATH.
+cdi: crymon.elf
+	mkdcdisc -e crymon.elf -o crymon.cdi -n "CryMon" -a "BeelzFight" \
 		-N --allow-overwrite
 
-.PHONY: all cdi clean rm-elf
+clean:
+	rm -f $(OBJS) crymon.elf crymon.cdi
+
+.PHONY: all cdi clean
