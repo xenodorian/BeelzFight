@@ -1,21 +1,30 @@
 /*
- * CryMon - Dreamcast port, step 1: title screen + starting room
- * background (no entities yet).
+ * CryMon - Dreamcast port, step 2: populate the starting room with its
+ * entities (player + furniture) and hook up movement/interact
+ * controls. Still no CryMon-catching mechanics and no leaving the
+ * room via the door -- both explicitly deferred to a later step.
  *
- * Bare-metal, no KallistiOS/BIOS calls. Video setup, vblank sync, the
- * font/glyph drawing, and the Maple controller driver are carried over
- * unchanged from this repo's hello-world-dreamcast project, where they
- * were already checked against KallistiOS's real source and confirmed
- * booting correctly (see that project's src/hello.c for the same code
- * with fuller derivation notes).
+ * Bare-metal, no KallistiOS/BIOS calls. Video setup, vblank sync, and
+ * the Maple controller driver are unchanged from step 1 (see that
+ * commit / hello-world-dreamcast/src/hello.c for the full derivation
+ * notes against KallistiOS's real source).
  *
- * The starting room ("HOUSE") is CryMon's own first map, from the
- * reference implementation (xenodorian/CryMon, love/game/src/data.lua
- * and src/draw.lua's paintTile()): an 14x11 grid of flat-colored tiles
- * with no separate art asset (the original game itself renders this
- * room as solid-color rectangles, not a background image), so the
- * exact same tile layout and colors are reproduced here directly
- * rather than converting any image.
+ * Room layout, tile colors, solid/walkable tiles, prop positions and
+ * sizes, player movement speed, and the four interactable dialogue
+ * lines are all taken from the reference implementation
+ * (xenodorian/CryMon):
+ *   - love/game/src/data.lua: data.HOUSE (tile grid), data.isSolidTile
+ *     (SOLID_SET), data.spawnOf (tile-center world coords), data.TALK
+ *     (dialogue text).
+ *   - love/game/src/draw.lua: paintTile (tile colors), draw.actor
+ *     (player silhouette: colored body + facing wedge, used here
+ *     as-is since no sprite art pipeline exists yet for this port).
+ *   - love/game/src/render.lua: drawWorld (prop positions/sizes: e.g.
+ *     "prop-bed-father" 64x56, "prop-shelf" 40x44) and the movement
+ *     code (speed = 110px/sec at the original's 32px tile size).
+ * No monster-granting, item-granting, or door-warp logic is ported --
+ * interacting always shows the same first-time line, and stepping on
+ * the door tile does nothing.
  */
 
 #include <stdint.h>
@@ -128,71 +137,110 @@ static u16 rgb565(u8 r, u8 g, u8 b) {
     return (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
 }
 
-/* 8x8, 1bpp glyphs: bit 7 = leftmost pixel of each row. Covers the
-   letters needed for "PRESS START". */
-enum { GLYPH_SPACE, GLYPH_P, GLYPH_R, GLYPH_E, GLYPH_S, GLYPH_T, GLYPH_A };
-
-static const uint8_t glyphs[7][8] = {
-    /* space */
-    { 0b00000000, 0b00000000, 0b00000000, 0b00000000,
-      0b00000000, 0b00000000, 0b00000000, 0b00000000 },
-    /* P */
-    { 0b11111100, 0b10000010, 0b10000010, 0b11111100,
-      0b10000000, 0b10000000, 0b10000000, 0b00000000 },
-    /* R */
-    { 0b11111110, 0b10000001, 0b10000001, 0b11111110,
-      0b10010000, 0b10001000, 0b10000100, 0b00000000 },
-    /* E */
-    { 0b11111111, 0b10000000, 0b10000000, 0b11111100,
-      0b10000000, 0b10000000, 0b11111111, 0b00000000 },
-    /* S */
-    { 0b01111110, 0b10000000, 0b10000000, 0b01111100,
-      0b00000010, 0b00000010, 0b11111100, 0b00000000 },
-    /* T */
-    { 0b11111111, 0b00011000, 0b00011000, 0b00011000,
-      0b00011000, 0b00011000, 0b00011000, 0b00000000 },
-    /* A */
-    { 0b00111100, 0b01000010, 0b10000001, 0b10000001,
-      0b11111111, 0b10000001, 0b10000001, 0b00000000 },
+/* ----------------------------------------------------------------------
+ * Font: 8x8, 1bpp glyphs, A-Z + space. Bit 7 = leftmost pixel of each
+ * row. Enough to render the interact-dialogue lines and the title
+ * screen; text is upper-cased and punctuation-free by construction.
+ * ---------------------------------------------------------------------- */
+static const uint8_t font_AZ[26][8] = {
+    /* A */ { 0b00111100, 0b01000010, 0b10000001, 0b10000001,
+              0b11111111, 0b10000001, 0b10000001, 0b00000000 },
+    /* B */ { 0b11111100, 0b10000010, 0b10000010, 0b11111100,
+              0b10000010, 0b10000010, 0b11111100, 0b00000000 },
+    /* C */ { 0b01111110, 0b10000000, 0b10000000, 0b10000000,
+              0b10000000, 0b10000000, 0b01111110, 0b00000000 },
+    /* D */ { 0b11111100, 0b10000010, 0b10000001, 0b10000001,
+              0b10000001, 0b10000010, 0b11111100, 0b00000000 },
+    /* E */ { 0b11111111, 0b10000000, 0b10000000, 0b11111100,
+              0b10000000, 0b10000000, 0b11111111, 0b00000000 },
+    /* F */ { 0b11111111, 0b10000000, 0b10000000, 0b11111100,
+              0b10000000, 0b10000000, 0b10000000, 0b00000000 },
+    /* G */ { 0b01111110, 0b10000000, 0b10000000, 0b10001111,
+              0b10000001, 0b10000001, 0b01111110, 0b00000000 },
+    /* H */ { 0b10000001, 0b10000001, 0b10000001, 0b11111111,
+              0b10000001, 0b10000001, 0b10000001, 0b00000000 },
+    /* I */ { 0b11111111, 0b00011000, 0b00011000, 0b00011000,
+              0b00011000, 0b00011000, 0b11111111, 0b00000000 },
+    /* J */ { 0b00000111, 0b00000010, 0b00000010, 0b00000010,
+              0b10000010, 0b10000010, 0b01111100, 0b00000000 },
+    /* K */ { 0b10000010, 0b10000100, 0b10001000, 0b11110000,
+              0b10001000, 0b10000100, 0b10000010, 0b00000000 },
+    /* L */ { 0b10000000, 0b10000000, 0b10000000, 0b10000000,
+              0b10000000, 0b10000000, 0b11111111, 0b00000000 },
+    /* M */ { 0b10000001, 0b11000011, 0b10100101, 0b10011001,
+              0b10000001, 0b10000001, 0b10000001, 0b00000000 },
+    /* N */ { 0b10000001, 0b11000001, 0b10100001, 0b10010001,
+              0b10001001, 0b10000101, 0b10000011, 0b00000000 },
+    /* O */ { 0b01111110, 0b10000001, 0b10000001, 0b10000001,
+              0b10000001, 0b10000001, 0b01111110, 0b00000000 },
+    /* P */ { 0b11111100, 0b10000010, 0b10000010, 0b11111100,
+              0b10000000, 0b10000000, 0b10000000, 0b00000000 },
+    /* Q */ { 0b01111110, 0b10000001, 0b10000001, 0b10000001,
+              0b10010101, 0b10001001, 0b01110110, 0b00000000 },
+    /* R */ { 0b11111110, 0b10000001, 0b10000001, 0b11111110,
+              0b10010000, 0b10001000, 0b10000100, 0b00000000 },
+    /* S */ { 0b01111110, 0b10000000, 0b10000000, 0b01111100,
+              0b00000010, 0b00000010, 0b11111100, 0b00000000 },
+    /* T */ { 0b11111111, 0b00011000, 0b00011000, 0b00011000,
+              0b00011000, 0b00011000, 0b00011000, 0b00000000 },
+    /* U */ { 0b10000001, 0b10000001, 0b10000001, 0b10000001,
+              0b10000001, 0b10000001, 0b01111110, 0b00000000 },
+    /* V */ { 0b10000001, 0b10000001, 0b10000001, 0b01000010,
+              0b01000010, 0b00100100, 0b00011000, 0b00000000 },
+    /* W */ { 0b10000001, 0b10000001, 0b10000001, 0b10100101,
+              0b10100101, 0b11011011, 0b10000001, 0b00000000 },
+    /* X */ { 0b10000001, 0b01000010, 0b00100100, 0b00011000,
+              0b00100100, 0b01000010, 0b10000001, 0b00000000 },
+    /* Y */ { 0b10000001, 0b01000010, 0b00100100, 0b00011000,
+              0b00011000, 0b00011000, 0b00011000, 0b00000000 },
+    /* Z */ { 0b11111111, 0b00000010, 0b00000100, 0b00001000,
+              0b00010000, 0b00100000, 0b11111111, 0b00000000 },
 };
 
-#define GLYPH_SCALE 3
-#define GLYPH_PX    (8 * GLYPH_SCALE)
-
-static void draw_glyph(int ox, int oy, int glyph) {
+static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int scale) {
     int row, col, sx, sy;
 
     for(row = 0; row < 8; row++) {
-        uint8_t bits = glyphs[glyph][row];
+        uint8_t bits = bitmap[row];
 
         for(col = 0; col < 8; col++) {
             if(!(bits & (0x80 >> col)))
                 continue;
 
-            for(sy = 0; sy < GLYPH_SCALE; sy++)
-                for(sx = 0; sx < GLYPH_SCALE; sx++)
-                    put_pixel(ox + col * GLYPH_SCALE + sx,
-                              oy + row * GLYPH_SCALE + sy,
-                              0xFFFF);
+            for(sy = 0; sy < scale; sy++)
+                for(sx = 0; sx < scale; sx++)
+                    put_pixel(ox + col * scale + sx, oy + row * scale + sy, color);
         }
     }
 }
 
-static const int message[] = {
-    GLYPH_P, GLYPH_R, GLYPH_E, GLYPH_S, GLYPH_S, GLYPH_SPACE,
-    GLYPH_S, GLYPH_T, GLYPH_A, GLYPH_R, GLYPH_T
-};
-#define MESSAGE_LEN (int)(sizeof(message) / sizeof(message[0]))
+static void draw_text_s(const char *s, int x, int y, u16 color, int scale) {
+    int cx = x;
+    int px = 8 * scale;
+    for(; *s; s++) {
+        if(*s >= 'A' && *s <= 'Z')
+            draw_glyph(cx, y, font_AZ[*s - 'A'], color, scale);
+        cx += px;
+    }
+}
+
+static int text_width_s(const char *s, int scale) {
+    int n = 0;
+    for(; *s; s++) n++;
+    return n * 8 * scale;
+}
+
+static void draw_text_center_s(const char *s, int cx, int y, u16 color, int scale) {
+    draw_text_s(s, cx - text_width_s(s, scale) / 2, y, color, scale);
+}
+
+#define TITLE_SCALE 3
+#define DIALOGUE_SCALE 1
 
 static void draw_press_start(void) {
-    int i;
-    int total_w = MESSAGE_LEN * GLYPH_PX;
-    int ox = (SCREEN_W - total_w) / 2;
-    int oy = (SCREEN_H - GLYPH_PX) / 2;
-
     vram_clear();
-    for(i = 0; i < MESSAGE_LEN; i++)
-        draw_glyph(ox + i * GLYPH_PX, oy, message[i]);
+    draw_text_center_s("PRESS START", SCREEN_W / 2,
+                        SCREEN_H / 2 - 4 * TITLE_SCALE, 0xFFFF, TITLE_SCALE);
 }
 
 /* ----------------------------------------------------------------------
@@ -213,7 +261,14 @@ static void draw_press_start(void) {
 #define MAPLE_RESPONSE_DATATRF  8
 #define MAPLE_FUNC_CONTROLLER   0x01000000u
 
-#define CONT_START  (1u << 3)
+#define CONT_C            (1u << 0)
+#define CONT_B            (1u << 1)
+#define CONT_A            (1u << 2)
+#define CONT_START        (1u << 3)
+#define CONT_DPAD_UP      (1u << 4)
+#define CONT_DPAD_DOWN    (1u << 5)
+#define CONT_DPAD_LEFT    (1u << 6)
+#define CONT_DPAD_RIGHT   (1u << 7)
 
 static u32 maple_cmd_buf[8]  __attribute__((aligned(32)));
 static u32 maple_resp_buf[64] __attribute__((aligned(32)));
@@ -262,16 +317,17 @@ static int pressed(u16 raw, u16 mask) {
 
 /* ----------------------------------------------------------------------
  * The starting room ("HOUSE"), verbatim from CryMon's
- * love/game/src/data.lua (data.HOUSE) and love/game/src/draw.lua
- * (paintTile) -- see the file header comment for the exact source
- * paths. 14 columns x 11 rows, 32px tiles in the original; drawn here
- * at 20px tiles (280x220) so the whole room fits centered on the
- * Dreamcast's 320x240 screen without needing camera scrolling for this
- * first step.
+ * love/game/src/data.lua (data.HOUSE), data.isSolidTile (SOLID_SET),
+ * and love/game/src/draw.lua (paintTile). 14 columns x 11 rows, 32px
+ * tiles in the original; drawn here at 20px tiles (280x220) so the
+ * whole room fits centered on the Dreamcast's 320x240 screen -- this
+ * step doesn't need camera scrolling since nothing leaves the room.
  * ---------------------------------------------------------------------- */
 #define ROOM_TILE   20
 #define ROOM_COLS   14
 #define ROOM_ROWS   11
+#define ROOM_OX     ((SCREEN_W - ROOM_COLS * ROOM_TILE) / 2)
+#define ROOM_OY     ((SCREEN_H - ROOM_ROWS * ROOM_TILE) / 2)
 
 static const char *const house_room[ROOM_ROWS] = {
     "HHHHHHHHHHHHHH",
@@ -286,6 +342,35 @@ static const char *const house_room[ROOM_ROWS] = {
     "HFFFFFFFFFFFFH",
     "HHHHHHDHHHHHHH",
 };
+
+/* data.lua's SOLID_SET restricted to the characters that actually
+   appear in HOUSE: H (wall), B (father's bed), C (crate), U (empty
+   bed) are solid; F, P, D, S are walkable (yes, the shelf tile itself
+   is walkable in the reference game -- SOLID_SET has no 'S' in it). */
+static int tile_is_solid(char ch) {
+    return ch == 'H' || ch == 'B' || ch == 'C' || ch == 'U';
+}
+
+static char tile_at(int col, int row) {
+    if(col < 0 || col >= ROOM_COLS || row < 0 || row >= ROOM_ROWS)
+        return 'H';
+    return house_room[row][col];
+}
+
+static void find_mark(char mark, int *out_col, int *out_row) {
+    int row, col;
+    for(row = 0; row < ROOM_ROWS; row++) {
+        for(col = 0; col < ROOM_COLS; col++) {
+            if(house_room[row][col] == mark) {
+                *out_col = col;
+                *out_row = row;
+                return;
+            }
+        }
+    }
+    *out_col = 2;
+    *out_row = 2;
+}
 
 static void draw_room_tile(char ch, int dx, int dy) {
     int t = ROOM_TILE;
@@ -309,38 +394,198 @@ static void draw_room_tile(char ch, int dx, int dy) {
     }
 }
 
-static void draw_house_room(void) {
+static void draw_house_background(void) {
     int row, col;
-    int ox = (SCREEN_W - ROOM_COLS * ROOM_TILE) / 2;
-    int oy = (SCREEN_H - ROOM_ROWS * ROOM_TILE) / 2;
 
-    vram_clear();
     for(row = 0; row < ROOM_ROWS; row++)
         for(col = 0; col < ROOM_COLS; col++)
             draw_room_tile(house_room[row][col],
-                            ox + col * ROOM_TILE, oy + row * ROOM_TILE);
+                            ROOM_OX + col * ROOM_TILE, ROOM_OY + row * ROOM_TILE);
+}
+
+/* Prop sizes below are the original 32px-tile-space sprite sizes
+   (render.lua's drawPropImg calls) scaled by 20/32 to match our tile
+   size; positions are each mark's tile center in our own room space. */
+#define SCALE_NUM 20
+#define SCALE_DEN 32
+static int scale_len(int px) { return (px * SCALE_NUM) / SCALE_DEN; }
+
+static void mark_center(char mark, int *out_x, int *out_y) {
+    int col, row;
+    find_mark(mark, &col, &row);
+    *out_x = ROOM_OX + col * ROOM_TILE + ROOM_TILE / 2;
+    *out_y = ROOM_OY + row * ROOM_TILE + ROOM_TILE / 2;
+}
+
+static void draw_prop(char mark, int w, int h, u16 color) {
+    int cx, cy;
+    mark_center(mark, &cx, &cy);
+    fill_rect(cx - scale_len(w) / 2, cy - scale_len(h) / 2,
+              scale_len(w), scale_len(h), color);
+}
+
+static void draw_props(void) {
+    /* render.lua sizes: prop-bed-father/prop-bed-empty 64x56,
+       prop-shelf 40x44, prop-crate 32x32. Distinct flat colors stand
+       in for the sprite art (no asset pipeline yet for this port). */
+    draw_prop('B', 64, 56, rgb565(120, 70, 60));  /* father, in bed   */
+    draw_prop('U', 64, 56, rgb565(150, 140, 120)); /* empty bed        */
+    draw_prop('S', 40, 44, rgb565(90, 60, 40));    /* shelf            */
+    draw_prop('C', 32, 32, rgb565(110, 90, 50));   /* crate            */
+}
+
+/* Player silhouette, matching draw.lua's draw.actor(): a colored body
+   block plus a facing wedge, since no sprite art exists yet. */
+#define PLAYER_W scale_len(48)
+#define PLAYER_H scale_len(52)
+
+static void draw_player(int cx, int cy, int dir) {
+    int x = cx - PLAYER_W / 2, y = cy - PLAYER_H;
+    fill_rect(x, y, PLAYER_W, PLAYER_H, rgb565(90, 140, 200));
+    fill_rect(x + 2, y + 2, PLAYER_W - 4, PLAYER_H / 3, rgb565(120, 170, 230));
+
+    /* facing wedge, drawn as a small filled diamond-half at the front */
+    {
+        int fx = cx, fy = y + PLAYER_H / 3;
+        int i;
+        for(i = 0; i < 4; i++) {
+            switch(dir) {
+                case 0: fill_rect(fx - (3 - i), fy + i, (3 - i) * 2 + 1, 1, 0xFFFF); break; /* down */
+                case 1: fill_rect(fx - (3 - i), fy + 3 - i, (3 - i) * 2 + 1, 1, 0xFFFF); break; /* up */
+                case 2: fill_rect(fx - 3 + i, fy - (3 - i), 1, (3 - i) * 2 + 1, 0xFFFF); break; /* left */
+                default: fill_rect(fx + 3 - i, fy - (3 - i), 1, (3 - i) * 2 + 1, 0xFFFF); break; /* right */
+            }
+        }
+    }
+}
+
+/* ----------------------------------------------------------------------
+ * Interact dialogue: first line only from each of data.TALK.bed /
+ * father / shelf / crate (love/game/src/data.lua), upper-cased for our
+ * A-Z-only font. No state is changed by interacting -- no monster or
+ * item is granted, so the same line shows every time.
+ * ---------------------------------------------------------------------- */
+static const char *dialogue_for(char mark) {
+    switch(mark) {
+        case 'U': return "JUST UNTIL THEY BREATHE AGAIN";
+        case 'B': return "THERES A WAR CRYTOWN IS BLEEDING";
+        case 'S': return "THIS IS IT FATHERS CRYSTAL";
+        case 'C': return "A WRAP HE WONT MISS IT";
+        default:  return 0;
+    }
+}
+
+static void draw_dialogue_box(const char *line) {
+    fill_rect(4, SCREEN_H - 44, SCREEN_W - 8, 40, rgb565(18, 17, 14));
+    fill_rect(4, SCREEN_H - 44, SCREEN_W - 8, 2, rgb565(197, 206, 198));
+    fill_rect(4, SCREEN_H - 6, SCREEN_W - 8, 2, rgb565(197, 206, 198));
+    draw_text_s(line, 12, SCREEN_H - 30, rgb565(232, 228, 216), DIALOGUE_SCALE);
+}
+
+/* interact() in state.lua: closest of U/B/S/C within a 36px radius
+   (36*36=1296) in the original's 32px-tile space; scaled to our 20px
+   tiles that's a 22.5px radius (22*22=484). */
+static char closest_mark(int px, int py) {
+    static const char marks[4] = { 'U', 'B', 'S', 'C' };
+    int i;
+    int best = 484, best_i = -1;
+
+    for(i = 0; i < 4; i++) {
+        int mx, my, dx, dy, d;
+        mark_center(marks[i], &mx, &my);
+        dx = px - mx;
+        dy = py - my;
+        d = dx * dx + dy * dy;
+        if(d <= best) {
+            best = d;
+            best_i = i;
+        }
+    }
+    return best_i >= 0 ? marks[best_i] : 0;
 }
 
 void main(void) {
     int state = 0; /* 0 = title screen, 1 = starting room */
-    int prev_start = 0;
+    int prev_start = 0, prev_a = 0;
+    int px, py, pdir = 0; /* dir: 0=down,1=up,2=left,3=right */
+    int col, row;
+    const char *dialogue = 0;
     u16 raw;
-    int start_now;
+    int start_now, a_now;
 
     video_init();
     maple_init();
     draw_press_start();
 
+    find_mark('P', &col, &row);
+    px = ROOM_OX + col * ROOM_TILE + ROOM_TILE / 2;
+    py = ROOM_OY + row * ROOM_TILE + ROOM_TILE / 2;
+
     for(;;) {
         wait_vblank();
         raw = maple_poll_buttons();
         start_now = pressed(raw, CONT_START);
+        a_now     = pressed(raw, CONT_A);
 
-        if(state == 0 && start_now && !prev_start) {
-            state = 1;
-            draw_house_room();
+        if(state == 0) {
+            if(start_now && !prev_start) {
+                state = 1;
+                draw_house_background();
+                draw_props();
+                draw_player(px, py, pdir);
+            }
+        }
+        else {
+            int dx = 0, dy = 0;
+            int moved = 0;
+
+            if(pressed(raw, CONT_DPAD_LEFT))  { dx = -1; pdir = 2; }
+            if(pressed(raw, CONT_DPAD_RIGHT)) { dx = 1;  pdir = 3; }
+            if(pressed(raw, CONT_DPAD_UP))    { dy = -1; pdir = 1; }
+            if(pressed(raw, CONT_DPAD_DOWN))  { dy = 1;  pdir = 0; }
+
+            if(dx != 0 || dy != 0) {
+                /* Axis-separated movement so the player slides along
+                   walls instead of stopping dead on a diagonal. Half
+                   the collision box (6px) is checked at the
+                   candidate feet position. */
+                int speed = 1; /* px/frame; ~60px/sec at 60fps, scaled
+                                  down from the original's 110px/sec
+                                  at 32px tiles for our smaller room */
+                int nx = px + dx * speed;
+                int ny = py + dy * speed;
+
+                if(dx != 0 && !tile_is_solid(tile_at((nx + (dx > 0 ? 6 : -6) - ROOM_OX) / ROOM_TILE,
+                                                      (py - ROOM_OY) / ROOM_TILE))) {
+                    px = nx;
+                    moved = 1;
+                }
+                if(dy != 0 && !tile_is_solid(tile_at((px - ROOM_OX) / ROOM_TILE,
+                                                      (ny + (dy > 0 ? 6 : -6) - ROOM_OY) / ROOM_TILE))) {
+                    py = ny;
+                    moved = 1;
+                }
+
+                if(px < ROOM_OX + 8) px = ROOM_OX + 8;
+                if(px > ROOM_OX + ROOM_COLS * ROOM_TILE - 8) px = ROOM_OX + ROOM_COLS * ROOM_TILE - 8;
+                if(py < ROOM_OY + 8) py = ROOM_OY + 8;
+                if(py > ROOM_OY + ROOM_ROWS * ROOM_TILE - 4) py = ROOM_OY + ROOM_ROWS * ROOM_TILE - 4;
+            }
+            (void)moved;
+
+            if(a_now && !prev_a) {
+                char mark = closest_mark(px, py);
+                dialogue = mark ? dialogue_for(mark) : 0;
+            }
+
+            draw_house_background();
+            draw_props();
+            draw_player(px, py, pdir);
+            if(dialogue)
+                draw_dialogue_box(dialogue);
         }
 
         prev_start = start_now;
+        prev_a = a_now;
     }
 }
