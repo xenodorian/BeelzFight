@@ -2736,6 +2736,46 @@ void main(void) {
 
         if(state == 0) {
             if(start_now && !prev_start) {
+                /* resetRun(): every run-scoped variable back to its
+                   startup value, matching state.lua's own resetRun()
+                   (called on the title screen's next confirm/start
+                   after MODE.TITLE). Harmless -- and a no-op -- on the
+                   very first boot, since everything below is already
+                   sitting at exactly these values; the only path that
+                   actually needs it is looping back here from an
+                   ending (ending_mode's a_now handler sets state = 0
+                   without touching any of this), where without a
+                   reset the "new" run would silently resume with the
+                   previous one's party/bag/map/flags still live. */
+                map_id = MAP_HOUSE;
+                find_mark(MAP_HOUSE, 'P', &col, &row);
+                px = col * TILE + TILE / 2;
+                py = row * TILE + TILE / 2;
+                pdir = 0;
+                anim_counter = 0;
+                door_lock = 0;
+                got_shelf = 0; looted_crate = 0;
+                bag.salve = 2; bag.bandage = 2; bag.bitterroot = 1; bag.dust = 1; bag.gem = 0;
+                marks = 16;
+                party_n = 0; lead = 0;
+                in_battle = 0;
+                enc_lock = 8; last_tx = -1; last_ty = -1;
+                menu_mode = 0;
+                seq_lines = 0; seq_len = 0; seq_beat = 0;
+                post_action = POST_NONE; post_soldier_id = 0;
+                talked_wren = talked_mae = talked_ivo = talked_nell = 0;
+                talked_pike = pike_helped = nell_bonus = 0;
+                got_herb = got_gem = got_stump = read_cart = 0;
+                beat_calder = beat_mason = beat_shin = cath_caught = 0;
+                soldier_beaten[0] = soldier_beaten[1] = soldier_beaten[2] = 0;
+                mason_state = 0; mason_x = mason_y = 0.0f; mason_dir = 0; mason_anim = 0.0f;
+                battles = 0;
+                anne_state = 0; anne_x = anne_y = 0.0f; anne_dir = 0; anne_anim = 0.0f;
+                anne_gifted = 0;
+                soldiers_init = 0;
+                shop_open = 0; shop_sell_tab = 0; shop_cur = 0;
+                ending_mode = 0; ending_i = 0;
+
                 state = 1;
                 /* Seeds the battle RNG from however many vblanks
                    passed while the player sat at the title screen --
@@ -3007,11 +3047,8 @@ void main(void) {
             /* drawEnding()/drawDemoEnd(): step through data.ENDING_WIN
                or data.DEMO_END on A, return to the title screen after
                the last line (state.lua returns to MODE.TITLE, which
-               resetRun()s on the next confirm/start -- this port's
-               title screen already restarts a fresh run by construction,
-               since state==0 only ever leads into a freshly-initialized
-               state==1 the first time; see the note below on why we
-               don't attempt a true mid-session reset). */
+               resetRun()s on the next confirm/start -- ported above,
+               in the state == 0 branch's start_now handler). */
             if(a_now && !prev_a) {
                 ending_i++;
                 {
