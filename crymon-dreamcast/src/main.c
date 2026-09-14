@@ -55,27 +55,15 @@ typedef unsigned int   u32;
 #define SCREEN_W 320
 #define SCREEN_H 240
 
-/* Double buffering: draw into whichever buffer isn't currently being
-   scanned out, then flip PVR_FB_ADDR to it right after a vblank wait.
-   Without this, redrawing on every frame that the player moves writes
-   into the same buffer the display hardware is actively reading from,
-   which is what caused the movement-time flicker/tearing -- the
-   earlier "only redraw when something changed" fix only addressed the
-   at-rest case, since there's nothing to race when nothing redraws.
-   Two 320x240x16bpp buffers (150 KB each) easily fit in the PVR's 8MB
-   VRAM; 0x040000 (256KB) keeps the second buffer clear of the first
-   with room to spare. */
-#define FB_OFFSET0 0x000000u
-#define FB_OFFSET1 0x040000u
-
-static u32 fb_back_offset = FB_OFFSET1;
-static volatile u16 *draw_fb = (volatile u16 *)(0xa5000000u + FB_OFFSET1);
-
-static void fb_flip(void) {
-    PVR(PVR_FB_ADDR) = fb_back_offset;
-    fb_back_offset = (fb_back_offset == FB_OFFSET0) ? FB_OFFSET1 : FB_OFFSET0;
-    draw_fb = (volatile u16 *)(0xa5000000u + fb_back_offset);
-}
+/* Single framebuffer, written directly, with vblank pacing only
+   (no double buffering). The earlier double-buffer scheme not only
+   added complexity but was easy to get wrong (a first version left
+   the PVR_FB_ADDR swap landing off the vblank boundary, causing the
+   exact tearing it was meant to fix). A single buffer plus a
+   wait-then-draw loop is simpler and matches how the smallest
+   working reference code (e.g. KallistiOS's own raw-framebuffer
+   examples) does it. */
+static volatile u16 *const draw_fb = (volatile u16 *)0xa5000000u;
 
 /* DM_320x240_NTSC timing parameters, from KallistiOS's vid_builtin table */
 #define SCANLINES 262
@@ -417,10 +405,9 @@ static void draw_room_tile(char ch, int dx, int dy) {
 static void draw_house_background(void) {
     int row, col;
 
-    /* The room (280x220) doesn't cover the full 320x240 screen, and
-       with two alternating framebuffers the "other" one was never
-       cleared -- without this, its border margin would show stale
-       content from two frames ago the first time it's drawn into. */
+    /* The room (280x220) doesn't cover the full 320x240 screen, so
+       the border margin needs clearing or it would show whatever was
+       drawn there previously (e.g. the title screen text). */
     vram_clear();
 
     for(row = 0; row < ROOM_ROWS; row++)
@@ -542,8 +529,6 @@ void main(void) {
     video_init();
     maple_init();
     draw_press_start();
-    wait_vblank();
-    fb_flip();
 
     find_mark('P', &col, &row);
     px = ROOM_OX + col * ROOM_TILE + ROOM_TILE / 2;
@@ -557,11 +542,10 @@ void main(void) {
         if(state == 0) {
             if(start_now && !prev_start) {
                 state = 1;
+                wait_vblank();
                 draw_house_background();
                 draw_props();
                 draw_player(px, py, pdir);
-                wait_vblank();
-                fb_flip();
             }
         }
         else {
@@ -605,28 +589,23 @@ void main(void) {
                 dialogue = mark ? dialogue_for(mark) : 0;
             }
 
-            /* Redraw (into the back buffer) only when something
-               actually changed -- no point flipping to a frame
-               identical to the one already on screen. The vblank wait
-               happens right here, after drawing and immediately before
-               fb_flip(), matching KallistiOS's own vid_flip() usage
-               pattern (draw into the back buffer, vid_waitvbl(), then
-               flip): PVR_FB_ADDR is not hardware-latched to vblank, so
-               the address write has to happen at the vblank boundary
-               itself, not at some arbitrary point after drawing
-               finishes. The previous version waited for vblank at the
-               top of the loop, before drawing, which left the actual
-               fb_flip() (and its PVR_FB_ADDR write) landing wherever
-               drawing happened to finish -- a tear every frame that
-               redrew, which is exactly the movement-time flicker. */
+            /* Redraw only when something actually changed -- no point
+               repainting a frame identical to the one already on
+               screen. wait_vblank() right before drawing starts the
+               redraw as close to the start of the blanking interval
+               as possible, the same single-buffer approach KOS's own
+               raw-framebuffer examples use (e.g. mrbtris: write
+               directly to vram_s, pace with vid_waitvbl(), no manual
+               double buffering). Some tearing on a full-room redraw
+               is an accepted tradeoff of skipping double buffering
+               entirely, not a bug to chase. */
             if(px != old_px || py != old_py || pdir != old_dir || dialogue != old_dialogue) {
+                wait_vblank();
                 draw_house_background();
                 draw_props();
                 draw_player(px, py, pdir);
                 if(dialogue)
                     draw_dialogue_box(dialogue);
-                wait_vblank();
-                fb_flip();
             }
         }
 
