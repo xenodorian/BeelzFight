@@ -1864,6 +1864,9 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 
     out->foe = mint_monster(id, lv);
     out->wild = 1;
+    out->trainer_kind = TRAINER_WILD;
+    out->soldier_id = 0;
+    out->bench_n = 0;
     out->phase = 0;
     n = s_cat(out->msg[0], 0, "A WILD ");
     n = s_cat(out->msg[0], n, SPECIES[id].name);
@@ -2049,7 +2052,16 @@ static void draw_battle_minigame(const Battle *b) {
     draw_text_s("A TO STRIKE", MENU_X + 8, bar_y + bar_h + 8, rgb565(138, 134, 120), MENU_SCALE);
 }
 
+/* drawBattle()'s full-screen background, drawn before the status
+   boxes and menu -- also covers the letterboxing gap around the menu
+   panel (draw_menu_frame's box doesn't span the full screen) that the
+   world map would otherwise still be visible through. */
+static void draw_battle_bg(void) {
+    blit_sprite(battle_bg, BATTLE_BG_W, BATTLE_BG_H, 0, 0);
+}
+
 static void draw_battle(const Battle *b, const Bag *bag) {
+    draw_battle_bg();
     draw_menu_frame(b->phase == 0 ? "BATTLE" :
                      b->phase == 1 ? "ITEM" :
                      b->phase == 2 ? "ATTACK" :
@@ -3109,6 +3121,39 @@ void main(void) {
                             post_action = POST_CALDER;
                         }
                     }
+                    else if(mason_spawned) {
+                        /* Mason: spawns (mason_spawned) the first time
+                           the player leaves the house, standing at a
+                           fixed VELD spot near the door (see the
+                           world-NPC section comment). Interact
+                           triggers his fight the first time,
+                           masonAfter afterward. This has to be an
+                           else-if chained onto the same a_now check as
+                           every other VELD mark, not a separate `if`
+                           using the same button-press edge -- a
+                           separate `if` re-fired on the very same
+                           press that had just closed a dialogue
+                           (seq_lines had already gone back to 0 a few
+                           lines above, in this same frame), reopening
+                           Mason's dialogue immediately and forever the
+                           moment the player stood near him: closing
+                           masonWin instantly reopened masonAfter,
+                           and closing masonAfter's own last beat
+                           reopened masonAfter again, looping. */
+                        int mx = 15 * TILE + TILE / 2, my = 5 * TILE + TILE / 2;
+                        int ddx = px - mx, ddy = py - my;
+                        if(ddx * ddx + ddy * ddy <= 676) {
+                            if(beat_mason) {
+                                seq_lines = TALK_MASON_AFTER;
+                                seq_len = TALK_LEN(TALK_MASON_AFTER);
+                            }
+                            else {
+                                seq_lines = TALK_MASON_FIGHT;
+                                seq_len = TALK_LEN(TALK_MASON_FIGHT);
+                                post_action = POST_MASON;
+                            }
+                        }
+                    }
                     seq_beat = 0;
                 }
                 else if(map_id == MAP_FOREST) {
@@ -3157,27 +3202,6 @@ void main(void) {
                         seq_len = TALK_LEN(TALK_CATHLEEN_GONE);
                         seq_beat = 0;
                     }
-                }
-            }
-
-            /* Mason: spawns (mason_spawned) the first time the player
-               leaves the house, standing at a fixed VELD spot near the
-               door (see the section comment above). Interact triggers
-               his fight the first time, masonAfter afterward. */
-            if(a_now && !prev_a && !seq_lines && mason_spawned && map_id == MAP_VELD) {
-                int mx = 15 * TILE + TILE / 2, my = 5 * TILE + TILE / 2;
-                int ddx = px - mx, ddy = py - my;
-                if(ddx * ddx + ddy * ddy <= 676) {
-                    if(beat_mason) {
-                        seq_lines = TALK_MASON_AFTER;
-                        seq_len = TALK_LEN(TALK_MASON_AFTER);
-                    }
-                    else {
-                        seq_lines = TALK_MASON_FIGHT;
-                        seq_len = TALK_LEN(TALK_MASON_FIGHT);
-                        post_action = POST_MASON;
-                    }
-                    seq_beat = 0;
                 }
             }
 

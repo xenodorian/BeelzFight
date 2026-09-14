@@ -80,6 +80,15 @@ MONSTERS = [
 ]
 MONSTER_W, MONSTER_H = 56, 56
 
+# render.lua's drawBattle() draws this (sprites.lua's "bg" key) behind
+# everything else, full-screen, before the status boxes and menu; the
+# reference's own fallback when it's missing is a flat fill, which is
+# what this port's own battle screen did before this asset was wired
+# in. No transparency in the source (plain RGB), so no color key
+# needed -- every pixel is opaque.
+BATTLE_BG_SRC = 'battle-bg.png'
+BATTLE_BG_W, BATTLE_BG_H = 320, 240
+
 def rgb565(r, g, b):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
@@ -158,6 +167,12 @@ def main():
         im = Image.open(os.path.join(root, 'monsters', name, '1.png'))
         pixels = encode(im, MONSTER_W, MONSTER_H)
         emit_array(lines, 'monster_%s' % name, pixels, MONSTER_W, MONSTER_H)
+
+    lines.append('#define BATTLE_BG_W %d' % BATTLE_BG_W)
+    lines.append('#define BATTLE_BG_H %d' % BATTLE_BG_H)
+    im = Image.open(os.path.join(root, BATTLE_BG_SRC))
+    pixels = encode(im, BATTLE_BG_W, BATTLE_BG_H)
+    emit_array(lines, 'battle_bg', pixels, BATTLE_BG_W, BATTLE_BG_H)
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
