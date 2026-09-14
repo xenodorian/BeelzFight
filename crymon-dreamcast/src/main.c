@@ -1,12 +1,16 @@
 /*
- * CryMon - Dreamcast port, step 4: fully wire up the starting room --
- * entities (player + furniture), movement/interact controls, the real
- * multi-beat dialogue for each interactable, the state it gates
- * (getting Quillpup off the shelf, looting the crate), and read-only
- * bag/party menu screens. Leaving the room via the door is still
- * deferred: there's no second map built yet in this port, so the door
- * stays inert regardless of state, unlike the reference where an
- * unlocked door warps to MAP_VELD.
+ * CryMon - Dreamcast port, step 5: full world navigation. All 4 of
+ * the reference's maps (HOUSE, VELD, FOREST, GROVE) now exist, with
+ * camera scrolling for the three that are bigger than the screen, and
+ * every door/warp tile between them works, matching state.lua's warp
+ * chain (house<->veld<->forest<->grove) including the house door's
+ * gate on gotShelf. Still not ported: any NPC, soldier, wild
+ * encounter, the battle system, catching, the shop, or endings --
+ * VELD/FOREST/GROVE are walkable but otherwise empty; their many
+ * NPC/decoration tile marks (Q, K, M, V, X, J, T, 1-9, etc.) render
+ * with paintTile's colors but have no actors or interactions behind
+ * them yet. See the per-system notes further down for exactly what
+ * each ported piece does and doesn't cover.
  *
  * Bare-metal, no KallistiOS/BIOS calls. Video setup, vblank sync, and
  * the Maple controller driver are unchanged from step 1 (see that
@@ -502,20 +506,36 @@ static int pressed(u16 raw, u16 mask) {
 }
 
 /* ----------------------------------------------------------------------
- * The starting room ("HOUSE"), verbatim from CryMon's
- * love/game/src/data.lua (data.HOUSE), data.isSolidTile (SOLID_SET),
- * and love/game/src/draw.lua (paintTile). 14 columns x 11 rows, 32px
- * tiles in the original; drawn here at 20px tiles (280x220) so the
- * whole room fits centered on the Dreamcast's 320x240 screen -- this
- * step doesn't need camera scrolling since nothing leaves the room.
+ * The world: all 4 maps, verbatim from CryMon's love/game/src/data.lua
+ * (data.HOUSE/VELD/FOREST/GROVE), data.isSolidTile (SOLID_SET), and
+ * love/game/src/draw.lua (paintTile). 32px tiles in the original,
+ * drawn here at 20px (matching every earlier step); VELD/FOREST/GROVE
+ * are much bigger than the 320x240 screen, so this step adds camera
+ * scrolling (compute_camera below) -- HOUSE still ends up centered
+ * exactly like before, since a map smaller than the screen just gets
+ * a centered (possibly negative) camera offset.
+ *
+ * GROVE's mid-map 'D' row (data.lua splits the Cathleen half from the
+ * Shinigami half, opened only after Cathleen is caught) is walkable
+ * here rather than gated: no cathCaught state exists yet (that's
+ * battle/catching, a later milestone), and the reference project's
+ * own data.lua notes that native/crymon.c already ships this same
+ * simplification, so it's a documented, precedented deferral rather
+ * than a new gap.
  * ---------------------------------------------------------------------- */
-#define ROOM_TILE   20
-#define ROOM_COLS   14
-#define ROOM_ROWS   11
-#define ROOM_OX     ((SCREEN_W - ROOM_COLS * ROOM_TILE) / 2)
-#define ROOM_OY     ((SCREEN_H - ROOM_ROWS * ROOM_TILE) / 2)
+#define TILE 20
 
-static const char *const house_room[ROOM_ROWS] = {
+#define MAP_HOUSE  0
+#define MAP_VELD   1
+#define MAP_FOREST 2
+#define MAP_GROVE  3
+
+typedef struct {
+    const char *const *rows;
+    int cols, rows_n;
+} Map;
+
+static const char *const map_house_rows[] = {
     "HHHHHHHHHHHHHH",
     "HFFFFFFFFFFFFH",
     "HFFFFFFFFFFFFH",
@@ -529,25 +549,116 @@ static const char *const house_room[ROOM_ROWS] = {
     "HHHHHHDHHHHHHH",
 };
 
-/* data.lua's SOLID_SET restricted to the characters that actually
-   appear in HOUSE: H (wall), B (father's bed), C (crate), U (empty
-   bed) are solid; F, P, D, S are walkable (yes, the shelf tile itself
-   is walkable in the reference game -- SOLID_SET has no 'S' in it). */
+static const char *const map_veld_rows[] = {
+    "##############################",
+    "####..........RRRR..........##",
+    "##.Q.^^.......HHHH......WWW.##",
+    "##............HDH......WWA..##",
+    "##..K.........===...I...W....#",
+    "##...TTT.....=====.....TTT..G#",
+    "##...TTT....===,===....TTT...#",
+    "##....M......=====....**.....#",
+    "##.V.TTT......===......TTT...#",
+    "##............===............#",
+    "###....X...J.=====...........#",
+    "##...TTT......===............#",
+    "##............===.......L....#",
+    "##...TTT.....=====......TTT..#",
+    "##............===......^^....#",
+    "##....TTT....=====......TTT..#",
+    "##....TTT.....===......TTT...#",
+    "##............===............#",
+    "##...........=====.....NNNN..#",
+    "##............===.......NE...#",
+    "###...........===...........##",
+    "#############=Z=##############",
+};
+
+static const char *const map_forest_rows[] = {
+    "##########################",
+    "####.........Y.........###",
+    "###.........===.........##",
+    "##...TTT....===....TTT..##",
+    "##...TTT...=====...TTT..##",
+    "##.1........===.......2.##",
+    "##...TTT....===....TTT..##",
+    "##..........=====.......##",
+    "##...TTT....===....TTT..##",
+    "##...........===........##",
+    "##...TTT....=====..TTT..##",
+    "##...........===........##",
+    "##...TTT.....===...TTT..##",
+    "##...........=====......##",
+    "##....TTT....===...TTT..##",
+    "##............===.......##",
+    "##...TTT......===..TTT..##",
+    "##............===....3..##",
+    "###...........===......###",
+    "#############=O=##########",
+};
+
+static const char *const map_grove_rows[] = {
+    "##########################",
+    "####.........O.........###",
+    "###.........===.........##",
+    "##..........===.........##",
+    "##.........=====........##",
+    "##..........===.........##",
+    "##.........=====........##",
+    "##..........===.........##",
+    "##.........=====........##",
+    "##..........===.........##",
+    "##........=======.......##",
+    "##........===8===.......##",
+    "##........=======.......##",
+    "#############D############",
+    "##.........=====........##",
+    "##..........===.........##",
+    "##.........=====........##",
+    "##..........===.........##",
+    "##...........9..........##",
+    "###....................###",
+    "##########################",
+};
+
+static const Map MAPS[4] = {
+    { map_house_rows,  14, 11 },
+    { map_veld_rows,   30, 22 },
+    { map_forest_rows, 26, 20 },
+    { map_grove_rows,  26, 21 },
+};
+
+/* data.lua's SOLID_SET, verbatim: "#HWRBC^NKEVAQXUJI". D (door), S
+   (shelf) and the digit/letter NPC marks are deliberately absent --
+   doors must be walkable to trigger a warp, and marks are interacted
+   with by proximity, not blocked by collision. */
 static int tile_is_solid(char ch) {
-    return ch == 'H' || ch == 'B' || ch == 'C' || ch == 'U';
+    static const char *const solid = "#HWRBC^NKEVAQXUJI";
+    const char *p;
+    for(p = solid; *p; p++)
+        if(*p == ch)
+            return 1;
+    return 0;
 }
 
-static char tile_at(int col, int row) {
-    if(col < 0 || col >= ROOM_COLS || row < 0 || row >= ROOM_ROWS)
-        return 'H';
-    return house_room[row][col];
+/* Out-of-bounds tiles read as '#' (solid), matching data.tileAt. */
+static char tile_at(int map_id, int col, int row) {
+    const Map *m = &MAPS[map_id];
+    if(col < 0 || col >= m->cols || row < 0 || row >= m->rows_n)
+        return '#';
+    return m->rows[row][col];
 }
 
-static void find_mark(char mark, int *out_col, int *out_row) {
+/* First occurrence of mark, row-major, matching data.spawnOf's
+   row:find() scan order. Every call site below only asks for marks
+   known to exist on that map (checked against the grids above), so
+   the not-found fallback is never actually hit in practice. */
+static void find_mark(int map_id, char mark, int *out_col, int *out_row) {
+    const Map *m = &MAPS[map_id];
     int row, col;
-    for(row = 0; row < ROOM_ROWS; row++) {
-        for(col = 0; col < ROOM_COLS; col++) {
-            if(house_room[row][col] == mark) {
+    for(row = 0; row < m->rows_n; row++) {
+        for(col = 0; col < m->cols; col++) {
+            if(m->rows[row][col] == mark) {
                 *out_col = col;
                 *out_row = row;
                 return;
@@ -558,65 +669,164 @@ static void find_mark(char mark, int *out_col, int *out_row) {
     *out_row = 2;
 }
 
-static void draw_room_tile(char ch, int dx, int dy) {
-    int t = ROOM_TILE;
+static void mark_center(int map_id, char mark, int *out_x, int *out_y) {
+    int col, row;
+    find_mark(map_id, mark, &col, &row);
+    *out_x = col * TILE + TILE / 2;
+    *out_y = row * TILE + TILE / 2;
+}
+
+/* draw.lua's paintTile, verbatim palette (including its two-rect
+   detail tiles: grass speckle '.', tree 'T', forest-floor '#', flower
+   '*'). Tile chars not explicitly listed (every NPC/prop mark, plus
+   VELD/FOREST/GROVE decoration letters not ported to real props
+   here) fall through to paintTile's own grass-green default. */
+static void draw_tile(char ch, int dx, int dy) {
+    int t = TILE;
 
     switch(ch) {
         case 'H':
             fill_rect(dx, dy, t, t, rgb565(42, 30, 22));
             return;
-        case 'D':
-            fill_rect(dx, dy, t, t, rgb565(26, 18, 12));
+        case 'R':
+            fill_rect(dx, dy, t, t, rgb565(106, 64, 48));
             return;
         case 'F':
         case 'P':
+            fill_rect(dx, dy, t, t, rgb565(106, 82, 56));
+            return;
+        case 'D':
+            fill_rect(dx, dy, t, t, rgb565(26, 18, 12));
+            return;
         case 'B':
         case 'U':
         case 'C':
         case 'S':
-        default:
             fill_rect(dx, dy, t, t, rgb565(106, 82, 56));
+            return;
+        case '.':
+            fill_rect(dx, dy, t, t, rgb565(61, 90, 56));
+            fill_rect(dx + 3, dy + 4, 1, 1, rgb565(90, 122, 82));
+            return;
+        case 'T':
+            fill_rect(dx, dy, t, t, rgb565(47, 74, 44));
+            fill_rect(dx + 4, dy + 3, 3, 15, rgb565(106, 138, 58));
+            fill_rect(dx + 10, dy + 1, 3, 16, rgb565(90, 122, 82));
+            return;
+        case '=':
+        case 'Z':
+        case 'Y':
+        case '3':
+        case 'O':
+        case '8':
+        case '9':
+            fill_rect(dx, dy, t, t, rgb565(107, 90, 58));
+            return;
+        case ',':
+            fill_rect(dx, dy, t, t, rgb565(90, 74, 58));
+            return;
+        case '#':
+            fill_rect(dx, dy, t, t, rgb565(28, 36, 24));
+            fill_rect(dx + 3, dy + 1, 15, 11, rgb565(61, 90, 56));
+            return;
+        case 'W':
+            fill_rect(dx, dy, t, t, rgb565(42, 58, 68));
+            return;
+        case '^':
+            fill_rect(dx, dy, t, t, rgb565(74, 64, 48));
+            return;
+        case 'N':
+        case 'E':
+            fill_rect(dx, dy, t, t, rgb565(90, 70, 48));
+            return;
+        case '*':
+            fill_rect(dx, dy, t, t, rgb565(61, 90, 56));
+            fill_rect(dx + 8, dy + 8, 4, 4, rgb565(180, 60, 80));
+            return;
+        default:
+            fill_rect(dx, dy, t, t, rgb565(61, 90, 56));
             return;
     }
 }
 
-static void draw_house_background(void) {
+/* Keeps the player roughly centered, clamped to the map's edges; a
+   map no bigger than the screen (HOUSE) instead gets a fixed,
+   centered offset (possibly negative), which is what actually
+   produces the letterboxed look the old HOUSE-only code hardcoded --
+   a tile drawn at col*TILE - cam_x still lands in the right place
+   when cam_x is negative. */
+static void compute_camera(int map_id, int px, int py, int *cam_x, int *cam_y) {
+    const Map *m = &MAPS[map_id];
+    int mw = m->cols * TILE, mh = m->rows_n * TILE;
+    int cx, cy;
+
+    if(mw <= SCREEN_W) {
+        cx = (mw - SCREEN_W) / 2;
+    }
+    else {
+        cx = px - SCREEN_W / 2;
+        if(cx < 0) cx = 0;
+        if(cx > mw - SCREEN_W) cx = mw - SCREEN_W;
+    }
+
+    if(mh <= SCREEN_H) {
+        cy = (mh - SCREEN_H) / 2;
+    }
+    else {
+        cy = py - SCREEN_H / 2;
+        if(cy < 0) cy = 0;
+        if(cy > mh - SCREEN_H) cy = mh - SCREEN_H;
+    }
+
+    *cam_x = cx;
+    *cam_y = cy;
+}
+
+/* Draws only the tile range that can be visible at this camera
+   offset -- VELD alone is 30x22 = 660 tiles, too many to redraw
+   in full every frame at 20px/tile through put_pixel. */
+static void draw_map(int map_id, int cam_x, int cam_y) {
+    const Map *m = &MAPS[map_id];
+    int col0 = cam_x / TILE;
+    int col1 = (cam_x + SCREEN_W) / TILE + 1;
+    int row0 = cam_y / TILE;
+    int row1 = (cam_y + SCREEN_H) / TILE + 1;
     int row, col;
 
-    /* The room (280x220) doesn't cover the full 320x240 screen, so
-       the border margin needs clearing or it would show whatever was
+    if(col0 < 0) col0 = 0;
+    if(row0 < 0) row0 = 0;
+    if(col1 > m->cols) col1 = m->cols;
+    if(row1 > m->rows_n) row1 = m->rows_n;
+
+    /* Letterboxed maps (HOUSE) leave a border the tile loop below
+       never touches, so it needs clearing or it'd show whatever was
        drawn there previously (e.g. the title screen text). */
     vram_clear();
 
-    for(row = 0; row < ROOM_ROWS; row++)
-        for(col = 0; col < ROOM_COLS; col++)
-            draw_room_tile(house_room[row][col],
-                            ROOM_OX + col * ROOM_TILE, ROOM_OY + row * ROOM_TILE);
-}
-
-static void mark_center(char mark, int *out_x, int *out_y) {
-    int col, row;
-    find_mark(mark, &col, &row);
-    *out_x = ROOM_OX + col * ROOM_TILE + ROOM_TILE / 2;
-    *out_y = ROOM_OY + row * ROOM_TILE + ROOM_TILE / 2;
+    for(row = row0; row < row1; row++)
+        for(col = col0; col < col1; col++)
+            draw_tile(m->rows[row][col], col * TILE - cam_x, row * TILE - cam_y);
 }
 
 /* Props are center-anchored on their mark's tile center, matching the
-   flat-rect placeholders this replaces. Sizes come from sprites.h
-   (the real art's own dimensions, downscaled by gen_sprites.py --
-   not the original 32px-tile-space sizes from render.lua, which
-   didn't match the actual art's proportions anyway). */
-static void draw_prop(char mark, const u16 *px, int w, int h) {
+   flat-rect placeholders this replaced in an earlier step. Sizes come
+   from sprites.h (the real art's own dimensions, downscaled by
+   gen_sprites.py -- not the original 32px-tile-space sizes from
+   render.lua, which didn't match the actual art's proportions
+   anyway). HOUSE-only: B/U/S/C don't appear on any other map. */
+static void draw_prop(char mark, const u16 *px, int w, int h, int cam_x, int cam_y) {
     int cx, cy;
-    mark_center(mark, &cx, &cy);
-    blit_sprite(px, w, h, cx - w / 2, cy - h / 2);
+    mark_center(MAP_HOUSE, mark, &cx, &cy);
+    blit_sprite(px, w, h, cx - cam_x - w / 2, cy - cam_y - h / 2);
 }
 
-static void draw_props(void) {
-    draw_prop('B', prop_bed_father, PROP_BED_FATHER_W, PROP_BED_FATHER_H);
-    draw_prop('U', prop_bed_empty, PROP_BED_EMPTY_W, PROP_BED_EMPTY_H);
-    draw_prop('S', prop_shelf, PROP_SHELF_W, PROP_SHELF_H);
-    draw_prop('C', prop_crate, PROP_CRATE_W, PROP_CRATE_H);
+static void draw_props(int map_id, int cam_x, int cam_y) {
+    if(map_id != MAP_HOUSE)
+        return;
+    draw_prop('B', prop_bed_father, PROP_BED_FATHER_W, PROP_BED_FATHER_H, cam_x, cam_y);
+    draw_prop('U', prop_bed_empty, PROP_BED_EMPTY_W, PROP_BED_EMPTY_H, cam_x, cam_y);
+    draw_prop('S', prop_shelf, PROP_SHELF_W, PROP_SHELF_H, cam_x, cam_y);
+    draw_prop('C', prop_crate, PROP_CRATE_W, PROP_CRATE_H, cam_x, cam_y);
 }
 
 /* Player sprite, bottom-center anchored at (cx, cy) same as the
@@ -669,6 +879,36 @@ static const char *const TALK_CRATE_EMPTY[] = {
     "SPLINTERS AND A MOTH EMPTY",
 };
 
+/* Door/warp flavor lines, data.TALK.doorLocked/doorOut/cottage/
+   forestEnter/forestLeave/groveEnter/groveLeave. doorOut's original
+   also kicks off the Mason NPC encounter (masonPh) the first time you
+   leave the house; that's NPC/battle content not built yet, so this
+   step always shows doorOut's plain flavor text instead. */
+static const char *const TALK_DOOR_LOCKED[] = {
+    "NOT YET FATHERS CRYMON IS STILL ON THE SHELF",
+};
+static const char *const TALK_DOOR_OUT[] = {
+    "NIGHT AIR I CAN DO THIS",
+    "TALL GRASS HIDES CRYMON WREN WEST POND EAST BRAM ON THE PATH CALDER SOUTH",
+};
+static const char *const TALK_COTTAGE[] = {
+    "THE COTTAGE FATHER IN THE BED MY BED SOUTH DOOR LEAVES",
+};
+static const char *const TALK_FOREST_ENTER[] = {
+    "THE TREES CLOSE OVER THE PATH",
+    "TALL GRASS PATROLS IF THEY SEE YOU THEY WILL COME THE PATH KEEPS SOUTH",
+};
+static const char *const TALK_FOREST_LEAVE[] = {
+    "BACK TOWARD THE COTTAGE PATH",
+};
+static const char *const TALK_GROVE_ENTER[] = {
+    "THE GRASS DIES OUT STONE AND HUSH",
+    "NO TALL GRASS SOMETHING WAITS ON THE PATH",
+};
+static const char *const TALK_GROVE_LEAVE[] = {
+    "BACK UNDER THE TREES",
+};
+
 #define TALK_LEN(arr) (int)(sizeof(arr) / sizeof((arr)[0]))
 
 #define DIALOGUE_MAX_CHARS 37
@@ -682,24 +922,25 @@ static void draw_dialogue_box(const char *line) {
                  DIALOGUE_MAX_CHARS, DIALOGUE_LINE_H);
 }
 
-/* Small HUD overlaid on the room's top wall row, showing what the
-   room has granted so far -- there's no inventory/party menu in this
-   port yet, so this is the only on-screen confirmation that
-   interacting actually changed state. */
+/* Small HUD in the screen's top-left corner (fixed there regardless
+   of camera position), showing what interacting has granted so far
+   -- there's no inventory/party HUD overlay in the reference, but
+   there's also no way to see this port's bag/party menus without
+   opening them, so this stays as a quick-glance confirmation. */
 static void draw_hud(int got_shelf, int looted_crate, int bag_bandage) {
-    int y = ROOM_OY + 2;
+    int y = 2;
 
     if(got_shelf) {
         const char *label = "QUILLPUP LV";
-        draw_text_s(label, ROOM_OX + 4, y, 0xFFFF, DIALOGUE_SCALE);
-        draw_glyph(ROOM_OX + 4 + text_width_s(label, DIALOGUE_SCALE), y,
+        draw_text_s(label, 4, y, 0xFFFF, DIALOGUE_SCALE);
+        draw_glyph(4 + text_width_s(label, DIALOGUE_SCALE), y,
                    font_09[3], 0xFFFF, DIALOGUE_SCALE);
         y += DIALOGUE_LINE_H;
     }
     if(looted_crate) {
         const char *label = "BANDAGE X";
-        draw_text_s(label, ROOM_OX + 4, y, 0xFFFF, DIALOGUE_SCALE);
-        draw_glyph(ROOM_OX + 4 + text_width_s(label, DIALOGUE_SCALE), y,
+        draw_text_s(label, 4, y, 0xFFFF, DIALOGUE_SCALE);
+        draw_glyph(4 + text_width_s(label, DIALOGUE_SCALE), y,
                    font_09[bag_bandage % 10], 0xFFFF, DIALOGUE_SCALE);
     }
 }
@@ -798,6 +1039,8 @@ static void draw_party_menu(int got_shelf) {
 /* interact() in state.lua: closest of U/B/S/C within a 36px radius
    (36*36=1296) in the original's 32px-tile space; scaled to our 20px
    tiles that's a 22.5px radius (22*22=484). */
+/* HOUSE-only, matching interact()'s MAP_HOUSE branch -- callers only
+   invoke this when map_id == MAP_HOUSE. */
 static char closest_mark(int px, int py) {
     static const char marks[4] = { 'U', 'B', 'S', 'C' };
     int i;
@@ -805,7 +1048,7 @@ static char closest_mark(int px, int py) {
 
     for(i = 0; i < 4; i++) {
         int mx, my, dx, dy, d;
-        mark_center(marks[i], &mx, &my);
+        mark_center(MAP_HOUSE, marks[i], &mx, &my);
         dx = px - mx;
         dy = py - my;
         d = dx * dx + dy * dy;
@@ -817,13 +1060,36 @@ static char closest_mark(int px, int py) {
     return best_i >= 0 ? marks[best_i] : 0;
 }
 
+/* state.lua's warp(): places the player just past the destination
+   mark, facing back the way they came (down if arriving from the
+   south, up otherwise) -- matches doorLock's 20-frame cooldown below
+   against instantly re-triggering the door tile on arrival. */
+static void do_warp(int *map_id, int *px, int *py, int *pdir,
+                     int to_map, char mark, int from_south) {
+    int col, row, sx, sy;
+    *map_id = to_map;
+    find_mark(to_map, mark, &col, &row);
+    sx = col * TILE + TILE / 2;
+    sy = row * TILE + TILE / 2;
+    *px = sx;
+    *py = from_south ? (sy + TILE + 8) : (sy - TILE);
+    *pdir = from_south ? 0 : 1;
+}
+
 void main(void) {
     int state = 0; /* 0 = title screen, 1 = starting room */
     int prev_start = 0, prev_a = 0, prev_b = 0, prev_y = 0;
+    int map_id = MAP_HOUSE;
     int px, py, pdir = 0; /* dir: 0=down,1=up,2=left,3=right */
     int col, row;
+    int cam_x, cam_y;
     u16 raw;
     int start_now, a_now, b_now, y_now;
+
+    /* Frames left before a door tile can trigger another warp,
+       matching state.lua's G.doorLock (set to 20 on spawn/warp,
+       ticked down by 1 per world-state frame). */
+    int door_lock = 0;
 
     /* Room state, matching state.lua's G.gotShelf / G.lootedCrate /
        G.bag (data.START_BAG). No HP/SP system exists yet, so the
@@ -852,9 +1118,9 @@ void main(void) {
     video_init();
     maple_init();
 
-    find_mark('P', &col, &row);
-    px = ROOM_OX + col * ROOM_TILE + ROOM_TILE / 2;
-    py = ROOM_OY + row * ROOM_TILE + ROOM_TILE / 2;
+    find_mark(MAP_HOUSE, 'P', &col, &row);
+    px = col * TILE + TILE / 2;
+    py = row * TILE + TILE / 2;
 
     /* Prime both buffers with the title screen before the main loop
        starts flipping, so the first flip doesn't show whatever
@@ -888,8 +1154,13 @@ void main(void) {
             /* Movement is frozen while a dialogue sequence is active,
                matching state.lua's MODE.TALK (movement there is only
                processed in MODE.WALK). */
+            if(door_lock > 0)
+                door_lock--;
+
             if(!seq_lines) {
                 int dx = 0, dy = 0;
+                int map_w = MAPS[map_id].cols * TILE;
+                int map_h = MAPS[map_id].rows_n * TILE;
 
                 if(pressed(raw, CONT_DPAD_LEFT))  { dx = -1; pdir = 2; }
                 if(pressed(raw, CONT_DPAD_RIGHT)) { dx = 1;  pdir = 3; }
@@ -904,23 +1175,87 @@ void main(void) {
                     int speed = 1; /* px/frame; ~60px/sec at 60fps,
                                        scaled down from the original's
                                        110px/sec at 32px tiles for our
-                                       smaller room */
+                                       smaller tiles */
                     int nx = px + dx * speed;
                     int ny = py + dy * speed;
 
-                    if(dx != 0 && !tile_is_solid(tile_at((nx + (dx > 0 ? 6 : -6) - ROOM_OX) / ROOM_TILE,
-                                                          (py - ROOM_OY) / ROOM_TILE))) {
+                    if(dx != 0 && !tile_is_solid(tile_at(map_id, (nx + (dx > 0 ? 6 : -6)) / TILE,
+                                                          py / TILE))) {
                         px = nx;
                     }
-                    if(dy != 0 && !tile_is_solid(tile_at((px - ROOM_OX) / ROOM_TILE,
-                                                          (ny + (dy > 0 ? 6 : -6) - ROOM_OY) / ROOM_TILE))) {
+                    if(dy != 0 && !tile_is_solid(tile_at(map_id, px / TILE,
+                                                          (ny + (dy > 0 ? 6 : -6)) / TILE))) {
                         py = ny;
                     }
 
-                    if(px < ROOM_OX + 8) px = ROOM_OX + 8;
-                    if(px > ROOM_OX + ROOM_COLS * ROOM_TILE - 8) px = ROOM_OX + ROOM_COLS * ROOM_TILE - 8;
-                    if(py < ROOM_OY + 8) py = ROOM_OY + 8;
-                    if(py > ROOM_OY + ROOM_ROWS * ROOM_TILE - 4) py = ROOM_OY + ROOM_ROWS * ROOM_TILE - 4;
+                    if(px < 8) px = 8;
+                    if(px > map_w - 8) px = map_w - 8;
+                    if(py < 8) py = 8;
+                    if(py > map_h - 4) py = map_h - 4;
+                }
+
+                /* Door/warp tiles, matching state.lua's chain of
+                   mapId/tile checks (doorLock gates it, same as the
+                   reference). GROVE has no exit warp of its own in
+                   this step -- data.lua's GROVE only defines the 'O'
+                   entrance shared with FOREST, and the far side (past
+                   Shinigami) is battle-gated content not built yet. */
+                if(door_lock <= 0) {
+                    char here = tile_at(map_id, px / TILE, py / TILE);
+
+                    if(map_id == MAP_HOUSE && here == 'D') {
+                        if(!got_shelf) {
+                            find_mark(MAP_HOUSE, 'D', &col, &row);
+                            py = row * TILE + TILE / 2 - TILE;
+                            pdir = 1;
+                            door_lock = 20;
+                            seq_lines = TALK_DOOR_LOCKED;
+                            seq_len = TALK_LEN(TALK_DOOR_LOCKED);
+                            seq_beat = 0;
+                        }
+                        else {
+                            do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'D', 1);
+                            door_lock = 20;
+                            seq_lines = TALK_DOOR_OUT;
+                            seq_len = TALK_LEN(TALK_DOOR_OUT);
+                            seq_beat = 0;
+                        }
+                    }
+                    else if(map_id == MAP_VELD && here == 'D') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_HOUSE, 'D', 0);
+                        door_lock = 20;
+                        seq_lines = TALK_COTTAGE;
+                        seq_len = TALK_LEN(TALK_COTTAGE);
+                        seq_beat = 0;
+                    }
+                    else if(map_id == MAP_VELD && here == 'Z') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_FOREST, 'Y', 1);
+                        door_lock = 20;
+                        seq_lines = TALK_FOREST_ENTER;
+                        seq_len = TALK_LEN(TALK_FOREST_ENTER);
+                        seq_beat = 0;
+                    }
+                    else if(map_id == MAP_FOREST && here == 'Y') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'Z', 0);
+                        door_lock = 20;
+                        seq_lines = TALK_FOREST_LEAVE;
+                        seq_len = TALK_LEN(TALK_FOREST_LEAVE);
+                        seq_beat = 0;
+                    }
+                    else if(map_id == MAP_FOREST && here == 'O') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_GROVE, 'O', 1);
+                        door_lock = 20;
+                        seq_lines = TALK_GROVE_ENTER;
+                        seq_len = TALK_LEN(TALK_GROVE_ENTER);
+                        seq_beat = 0;
+                    }
+                    else if(map_id == MAP_GROVE && here == 'O') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_FOREST, 'O', 0);
+                        door_lock = 20;
+                        seq_lines = TALK_GROVE_LEAVE;
+                        seq_len = TALK_LEN(TALK_GROVE_LEAVE);
+                        seq_beat = 0;
+                    }
                 }
             }
 
@@ -935,7 +1270,7 @@ void main(void) {
                         seq_beat = 0;
                     }
                 }
-                else {
+                else if(map_id == MAP_HOUSE) {
                     /* interact(): state.lua's MAP_HOUSE branch,
                        verbatim -- U always shows TALK.bed; B shows
                        TALK.father the first time and TALK.fatherAfter
@@ -943,7 +1278,12 @@ void main(void) {
                        (tracked as got_shelf, no party system exists
                        yet to hold it) the first time and shows
                        TALK.shelfEmpty after; C grants a bandage the
-                       first time and shows TALK.crateEmpty after. */
+                       first time and shows TALK.crateEmpty after.
+                       state.lua's other map branches (VELD/FOREST/
+                       GROVE: soldiers, Cathleen, Shinigami) aren't
+                       ported yet -- those need the battle system
+                       first, so interacting elsewhere does nothing
+                       this step. */
                     char mark = closest_mark(px, py);
 
                     switch(mark) {
@@ -1010,9 +1350,10 @@ void main(void) {
             draw_press_start();
         }
         else {
-            draw_house_background();
-            draw_props();
-            draw_player(px, py, pdir);
+            compute_camera(map_id, px, py, &cam_x, &cam_y);
+            draw_map(map_id, cam_x, cam_y);
+            draw_props(map_id, cam_x, cam_y);
+            draw_player(px - cam_x, py - cam_y, pdir);
             draw_hud(got_shelf, looted_crate, bag.bandage);
             if(seq_lines)
                 draw_dialogue_box(seq_lines[seq_beat]);
