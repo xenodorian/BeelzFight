@@ -48,8 +48,9 @@ PROPS = {
 
 # name -> source PNG relative to public/sprites, single standing
 # frame each (frame 1, down-facing where the source has directions).
-# All are dir4-style ("<name>-1.png") except the ones with real walk
-# cycles (mason, soldier) which use their down-1.png like max.
+# Mason/Anne/soldier are NOT here -- they actually walk (approach/
+# patrol/chase), so they get the same full 4-direction x 4-frame
+# treatment as the player instead (see WALKERS below).
 NPCS = {
     'wren':    'npc/wren-1.png',
     'mae':     'npc/mae-1.png',
@@ -58,10 +59,16 @@ NPCS = {
     'pike':    'npc/pike-1.png',
     'bram':    'npc/bram-1.png',
     'calder':  'npc/calder-1.png',
-    'mason':   'mason/down-1.png',
-    'soldier': 'npc/soldier/down-1.png',
     'shinigami': 'shinigami/down-1.png',
-    'anne':      'anne/down-1.png',
+}
+
+# Walking actors: full walk cycle like the player, for the ones that
+# actually move (Mason and Anne approach the player, soldiers patrol/
+# chase -- see the world-actors section in main.c).
+WALKERS = {
+    'mason':   'mason',
+    'anne':    'anne',
+    'soldier': 'npc/soldier',
 }
 
 # Cathleen has no small walk sprite (she "fights as herself" -- her
@@ -154,6 +161,14 @@ def main():
         im = Image.open(os.path.join(root, relpath))
         pixels = encode(im, ACTOR_DST_W, ACTOR_DST_H)
         emit_array(lines, 'npc_%s' % name, pixels, ACTOR_DST_W, ACTOR_DST_H)
+
+    for name, reldir in WALKERS.items():
+        for d in PLAYER_DIRS:
+            for f in PLAYER_FRAMES:
+                im = Image.open(os.path.join(root, reldir, '%s-%d.png' % (d, f)))
+                assert im.size == (ACTOR_SRC_W, ACTOR_SRC_H), (name, d, f, im.size)
+                pixels = encode(im, ACTOR_DST_W, ACTOR_DST_H)
+                emit_array(lines, 'npc_%s_%s_%d' % (name, d, f), pixels, ACTOR_DST_W, ACTOR_DST_H)
 
     lines.append('#define CATHLEEN_WORLD_W %d' % CATHLEEN_WORLD_W)
     lines.append('#define CATHLEEN_WORLD_H %d' % CATHLEEN_WORLD_H)

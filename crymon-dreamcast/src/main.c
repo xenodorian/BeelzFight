@@ -875,14 +875,59 @@ static void draw_props(int map_id, int cam_x, int cam_y) {
    All stationary single-frame sprites -- see the world-NPC section
    comment further down for why (no walk/idle animation ported for
    any of them, unlike the player). */
+/* A patrolling/chasing FOREST soldier. File-scope (not just a local
+   inside main()) since draw_npcs below needs the type too. Matches
+   engine.ts's soldiers[] entries (id/name/species/level stay in the
+   const SoldierDef table further down; this is just the live
+   movement state). */
+typedef struct {
+    float x, y;
+    int dir, anim;
+    int chase;
+    int axis;           /* 0 = patrols x, 1 = patrols y, 2 = stationary */
+    float minv, maxv;
+    int sign;
+} Soldier;
+
 static void draw_npc(int map_id, char mark, const u16 *px, int w, int h, int cam_x, int cam_y) {
     int cx, cy;
     mark_center(map_id, mark, &cx, &cy);
     blit_sprite(px, w, h, cx - cam_x - w / 2, cy - cam_y - h);
 }
 
-static void draw_npcs(int map_id, int cam_x, int cam_y, int mason_spawned,
-                       int anne_spawned, int cath_caught) {
+/* dir/frame lookup tables for the 3 walking actors (Mason, Anne, the
+   FOREST soldiers all share one sprite set), matching
+   gen_sprites.py's PLAYER_DIRS order: 0=down,1=up,2=left,3=right. */
+static const u16 *const MASON_FRAMES[4][4] = {
+    { npc_mason_down_1,  npc_mason_down_2,  npc_mason_down_3,  npc_mason_down_4 },
+    { npc_mason_up_1,    npc_mason_up_2,    npc_mason_up_3,    npc_mason_up_4 },
+    { npc_mason_left_1,  npc_mason_left_2,  npc_mason_left_3,  npc_mason_left_4 },
+    { npc_mason_right_1, npc_mason_right_2, npc_mason_right_3, npc_mason_right_4 },
+};
+static const u16 *const ANNE_FRAMES[4][4] = {
+    { npc_anne_down_1,  npc_anne_down_2,  npc_anne_down_3,  npc_anne_down_4 },
+    { npc_anne_up_1,    npc_anne_up_2,    npc_anne_up_3,    npc_anne_up_4 },
+    { npc_anne_left_1,  npc_anne_left_2,  npc_anne_left_3,  npc_anne_left_4 },
+    { npc_anne_right_1, npc_anne_right_2, npc_anne_right_3, npc_anne_right_4 },
+};
+static const u16 *const SOLDIER_FRAMES[4][4] = {
+    { npc_soldier_down_1,  npc_soldier_down_2,  npc_soldier_down_3,  npc_soldier_down_4 },
+    { npc_soldier_up_1,    npc_soldier_up_2,    npc_soldier_up_3,    npc_soldier_up_4 },
+    { npc_soldier_left_1,  npc_soldier_left_2,  npc_soldier_left_3,  npc_soldier_left_4 },
+    { npc_soldier_right_1, npc_soldier_right_2, npc_soldier_right_3, npc_soldier_right_4 },
+};
+
+static void draw_walker(const u16 *const frames[4][4], float x, float y, int dir, int frame,
+                         int cam_x, int cam_y) {
+    int cx = (int)x, cy = (int)y;
+    blit_sprite(frames[dir & 3][frame & 3], NPC_SPRITE_W, NPC_SPRITE_H,
+                cx - cam_x - NPC_SPRITE_W / 2, cy - cam_y - NPC_SPRITE_H);
+}
+
+static void draw_npcs(int map_id, int cam_x, int cam_y,
+                       int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
+                       int anne_state, float anne_x, float anne_y, int anne_dir, int anne_frame,
+                       int cath_caught, const Soldier *soldiers, const int *soldier_beaten) {
     if(map_id == MAP_VELD) {
         draw_npc(map_id, 'K', npc_wren, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
         draw_npc(map_id, 'I', npc_mae, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
@@ -891,21 +936,18 @@ static void draw_npcs(int map_id, int cam_x, int cam_y, int mason_spawned,
         draw_npc(map_id, 'Q', npc_pike, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
         draw_npc(map_id, 'J', npc_bram, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
         draw_npc(map_id, 'E', npc_calder, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        if(mason_spawned) {
-            int mx = 15 * TILE + TILE / 2, my = 5 * TILE + TILE / 2;
-            blit_sprite(npc_mason, NPC_SPRITE_W, NPC_SPRITE_H,
-                        mx - cam_x - NPC_SPRITE_W / 2, my - cam_y - NPC_SPRITE_H);
-        }
-        if(anne_spawned) {
-            int ax = 17 * TILE + TILE / 2, ay = 7 * TILE + TILE / 2;
-            blit_sprite(npc_anne, NPC_SPRITE_W, NPC_SPRITE_H,
-                        ax - cam_x - NPC_SPRITE_W / 2, ay - cam_y - NPC_SPRITE_H);
-        }
+        if(mason_state)
+            draw_walker(MASON_FRAMES, mason_x, mason_y, mason_dir, mason_frame, cam_x, cam_y);
+        if(anne_state)
+            draw_walker(ANNE_FRAMES, anne_x, anne_y, anne_dir, anne_frame, cam_x, cam_y);
     }
     else if(map_id == MAP_FOREST) {
-        draw_npc(map_id, '1', npc_soldier, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, '2', npc_soldier, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, '3', npc_soldier, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        int i;
+        for(i = 0; i < 3; i++) {
+            if(soldier_beaten[i]) continue;
+            draw_walker(SOLDIER_FRAMES, soldiers[i].x, soldiers[i].y, soldiers[i].dir,
+                        (int)soldiers[i].anim, cam_x, cam_y);
+        }
     }
     else if(map_id == MAP_GROVE) {
         draw_npc(map_id, '9', npc_shinigami, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
@@ -1169,11 +1211,6 @@ static const char *const TALK_ANNE_GIFT[] = {
     "I WONT",
     "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAXS PALM CRYSTALS+5",
 };
-static const char *const TALK_ANNE_AGAIN[] = {
-    "DONT LOSE THOSE CALDER IS STILL SOUTH",
-    "I KNOW THE WAY",
-};
-
 /* data.ENDING_WIN / data.DEMO_END, shown by the new ending screen
    (draw_ending() in main()) after beating Calder / Shinigami. */
 static const char *const ENDING_WIN[] = {
@@ -1298,6 +1335,22 @@ static int clampi(int v, int lo, int hi) {
     if(v < lo) return lo;
     if(v > hi) return hi;
     return v;
+}
+
+/* No libc/math.h here, so a hand-rolled Newton-Raphson sqrt for the
+   actor-movement code below (normalizing a chase/approach direction
+   vector needs a real magnitude, not just the squared distance used
+   everywhere else's proximity checks). 12 iterations is overkill for
+   the small pixel distances involved but costs nothing on the SH4's
+   single-precision FPU. */
+static float f_sqrt(float x) {
+    float guess;
+    int i;
+    if(x <= 0.0f) return 0.0f;
+    guess = x > 1.0f ? x : 1.0f;
+    for(i = 0; i < 12; i++)
+        guess = 0.5f * (guess + x / guess);
+    return guess;
 }
 
 static Monster mint_monster(int species, int lv) {
@@ -2142,23 +2195,23 @@ static void draw_battle(const Battle *b, const Bag *bag) {
 }
 
 /* ----------------------------------------------------------------------
- * World NPCs. Every VELD/FOREST/GROVE character below is a stationary
- * proximity-interact point (this port's own interact()/closest_mark
- * pattern, already used for HOUSE's bed/shelf/crate), not the
- * reference's real-time actor: state.lua's soldiers patrol and give
- * chase on line-of-sight, and Mason force-walks toward the player the
- * moment they leave the house (masonPh 1, freezing player movement
- * until he catches up and starts masonFight). Porting that AI
- * faithfully is a real-time movement/collision system on the scale of
- * the battle system already built, for three soldiers plus Mason;
- * given everything else still to port (this comment's neighbors), the
- * pragmatic choice here is the same mechanical outcome (you can't
- * reach Calder without going through the soldiers/Mason encounters
- * that gate the path) reached by walking up and interacting, not by
- * being chased down. Mason's fixed spot is near the VELD door (the
- * player's exit point, close to where the reference's chase would
- * have caught them anyway); soldiers stand at their own patrol
- * origins (data.spawnOf(FOREST, "1"/"2"/"3")).
+ * World NPCs. Wren/Mae/Ivo/Nell/Pike/Bram/Calder/Shinigami/Cathleen
+ * are stationary proximity-interact points (this port's own
+ * interact()/closest_mark pattern, already used for HOUSE's bed/
+ * shelf/crate) -- engine.ts never moves them either, so this is a
+ * faithful 1:1. Mason, Anne and the three FOREST soldiers are real
+ * engine.ts actors with float positions and per-frame movement
+ * (approach/chase/patrol/leave, all ported below with the same speed
+ * constants engine.ts uses, scaled by this port's TILE=20 vs the
+ * original's TILE=32): Mason force-walks toward the player the moment
+ * they leave the house and ambushes them into masonFight on contact
+ * (mason_state 0 off/1 approach/2 standing-post-ambush/3 leaving);
+ * Anne does the same after the player's first battle, gifts gems on
+ * contact, then walks off (anne_state 0/1/2 done-pending/3 leaving);
+ * soldiers patrol a fixed axis around their spawn mark and give chase
+ * once the player crosses their line of sight (soldier_update()'s
+ * raycast below, ported from soldierLos()), ambushing the same way
+ * Mason does once they catch up.
  *
  * Anne, corrected: an earlier pass here concluded she was unreachable
  * because state.lua defines maybeAnne() but never calls it from
@@ -2169,12 +2222,7 @@ static void draw_battle(const Battle *b, const Bag *bag) {
  * called -- from updateWorld() every frame (gated on
  * !talking() && hudT<=0) and after cycling the party. So the Lua
  * intermediate has a real porting gap (a missing call site), not the
- * TS/canonical game; the faithful port includes Anne. Ported the same
- * way as Mason/soldiers above: stationary once spawned (battles >= 1
- * while on VELD, matching maybeStartAnne's gate -- data.lua's
- * anneGift text and TALK_ANNE_GIFT above are ported from the Lua
- * table, which matches the TS text) rather than her walk-toward-the-
- * player chase, at a fixed VELD spot distinct from Mason's.
+ * TS/canonical game; the faithful port includes Anne.
  * ---------------------------------------------------------------------- */
 static int near_mark(int map_id, char mark, int px, int py, int radius_sq) {
     int mx, my, dx, dy;
@@ -2199,6 +2247,76 @@ static const SoldierDef SOLDIERS[3] = {
     { '2', "SCOUT",  SP_MOSSBACK, 4 },
     { '3', "SENTRY", SP_RAZORBAT, 5 },
 };
+
+/* Real-time actor movement constants, ported from engine.ts's own
+   dt-based speeds (52/36/112/80 px/sec for approach/patrol/chase/
+   leave) scaled by this port's TILE=20 vs the original's TILE=32
+   (0.625x), then converted to a fixed per-frame step assuming a
+   60Hz vblank-paced loop (dt = 1/60) since this port has no real
+   delta-time -- see the "no dt" note in the movement update below. */
+#define ACTOR_SPD_APPROACH (32.5f / 60.0f)
+#define ACTOR_SPD_PATROL   (22.5f / 60.0f)
+#define ACTOR_SPD_CHASE    (70.0f / 60.0f)
+#define ACTOR_SPD_LEAVE    (50.0f / 60.0f)
+#define ACTOR_REACH_DIST   22.5f   /* 36 * 0.625, engine.ts's dist<36 */
+#define ACTOR_CHASE_CATCH  22.5f
+
+/* soldierLos(): raycast one tile at a time along the soldier's facing
+   direction until it hits a solid tile (miss) or the player's tile
+   (spotted). dir codes match pdir: 0=down,1=up,2=left,3=right. */
+static int soldier_los(int map_id, float sx, float sy, int dir, int ppx, int ppy) {
+    int stx = (int)sx / TILE, sty = (int)sy / TILE;
+    int ptx = ppx / TILE, pty = ppy / TILE;
+    int dx = (dir == 2) ? -1 : (dir == 3) ? 1 : 0;
+    int dy = (dir == 1) ? -1 : (dir == 0) ? 1 : 0;
+    int i, maxs;
+    if(dx == 0 && dy == 0) return 0;
+    maxs = MAPS[map_id].cols > MAPS[map_id].rows_n ? MAPS[map_id].cols : MAPS[map_id].rows_n;
+    for(i = 1; i <= maxs; i++) {
+        int tx = stx + dx * i, ty = sty + dy * i;
+        char ch = tile_at(map_id, tx, ty);
+        if(tile_is_solid(ch)) return 0;
+        if(tx == ptx && ty == pty) return 1;
+    }
+    return 0;
+}
+
+/* hitActor(): a live world actor blocks player movement like a solid
+   tile, matching state.lua's blocked() actor check. Only actors that
+   are actually standing in the world block -- Mason/Anne mid-approach
+   or mid-leave don't (the reference doesn't collide against them
+   either while they're walking toward/away from the player), nor does
+   a beaten soldier (soldier_beaten). Radius is a small fixed circle
+   around the actor's feet, not its full sprite box, so the player can
+   still walk up close enough to trigger the proximity-interact/ambush
+   checks that sit right next to this collision radius. */
+static int actor_blocks(int map_id, int cx, int cy,
+                         int mason_state, float mason_x, float mason_y,
+                         int anne_state, float anne_x, float anne_y,
+                         const Soldier *soldiers, const int *soldier_beaten) {
+    int dx, dy;
+#define HIT_R2 81 /* 9px radius, squared */
+    if(map_id == MAP_VELD) {
+        if(mason_state == 2) {
+            dx = cx - (int)mason_x; dy = cy - (int)mason_y;
+            if(dx * dx + dy * dy <= HIT_R2) return 1;
+        }
+        if(anne_state == 2) {
+            dx = cx - (int)anne_x; dy = cy - (int)anne_y;
+            if(dx * dx + dy * dy <= HIT_R2) return 1;
+        }
+    }
+    else if(map_id == MAP_FOREST && soldiers) {
+        int i;
+        for(i = 0; i < 3; i++) {
+            if(soldier_beaten[i]) continue;
+            dx = cx - (int)soldiers[i].x; dy = cy - (int)soldiers[i].y;
+            if(dx * dx + dy * dy <= HIT_R2) return 1;
+        }
+    }
+#undef HIT_R2
+    return 0;
+}
 
 /* ----------------------------------------------------------------------
  * Bram's shop, ported from state.lua's updateShop() -- data.lua notes
@@ -2394,34 +2512,54 @@ void main(void) {
     const char *const *seq_lines = 0;
     int seq_len = 0, seq_beat = 0;
     int post_action = 0, post_soldier_id = 0;
-#define POST_NONE      0
-#define POST_CALDER    1
-#define POST_MASON     2
-#define POST_SHINIGAMI 3
-#define POST_SOLDIER   4
-#define POST_CATHLEEN  5
-#define POST_SHOP      6
+#define POST_NONE        0
+#define POST_CALDER      1
+#define POST_MASON       2
+#define POST_SHINIGAMI   3
+#define POST_SOLDIER     4
+#define POST_CATHLEEN    5
+#define POST_SHOP        6
+#define POST_MASON_LEAVE 7
+#define POST_ANNE_LEAVE  8
 
     /* World NPC/pickup flags, matching state.lua's G.talkedWren etc.
        (see the world-NPC section comment above for what's ported vs
-       simplified). mason_spawned gates whether Mason's mark is
-       interactive at all -- he doesn't exist in the world until the
-       player first leaves the house. */
+       simplified). */
     int talked_wren = 0, talked_mae = 0, talked_ivo = 0, talked_nell = 0;
     int talked_pike = 0, pike_helped = 0, nell_bonus = 0;
     int got_herb = 0, got_gem = 0, got_stump = 0, read_cart = 0;
     int beat_calder = 0, beat_mason = 0, beat_shin = 0, cath_caught = 0;
-    int mason_spawned = 0;
     int soldier_beaten[3] = { 0, 0, 0 };
+
+    /* Mason/Anne real movement, matching state.lua's rival/anne
+       phase machines (see the world-actors section comment further
+       down for the full state chart and the formulas each number
+       comes from). Positions are float since chase/approach movement
+       is a normalized direction vector times a per-frame speed, not
+       a whole-pixel step like the player's own dpad movement. */
+    int mason_state = 0; /* 0 off, 1 approach, 2 standing (post-ambush), 3 leaving */
+    float mason_x = 0.0f, mason_y = 0.0f;
+    int mason_dir = 0;
+    float mason_anim = 0.0f;
 
     /* Anne: engine.ts's maybeStartAnne() gate is battlesDone>=1 while
        on VELD (onBattleOver()/battlesDone++ fires on soldier, Mason,
        and generic wild wins -- not Calder or Shinigami, matching the
-       Lua port's own audited note on selective battlesDone calls).
-       anne_spawned latches on once that's true, same pattern as
-       mason_spawned. */
+       Lua port's own audited note on selective battlesDone calls). */
     int battles = 0;
-    int anne_spawned = 0, anne_gifted = 0;
+    int anne_state = 0; /* 0 off, 1 approach, 2 done-pending (gift dialogue), 3 leaving */
+    float anne_x = 0.0f, anne_y = 0.0f;
+    int anne_dir = 0;
+    float anne_anim = 0.0f;
+    int anne_gifted = 0;
+
+    /* Soldiers: ensureSoldiers()'s 3 fixed NPCs, only meaningful once
+       FOREST has been visited (soldiers_init latches that, matching
+       ensureSoldiers()'s own "if already built, skip" guard). Type
+       is file-scope (see above draw_npcs) since that draw function
+       needs it too. */
+    Soldier soldiers[3];
+    int soldiers_init = 0;
 
     /* Shop (Bram) and ending screens. */
     int shop_open = 0, shop_sell_tab = 0, shop_cur = 0;
@@ -2736,11 +2874,150 @@ void main(void) {
 
             /* maybeStartAnne(): battlesDone>=1 while on VELD, gated
                on not already talking (matches its !talking() check
-               closely enough -- see the world-NPC section comment). */
-            if(!anne_spawned && !seq_lines && battles >= 1 && map_id == MAP_VELD)
-                anne_spawned = 1;
+               closely enough). Spawns her at the player's own spot
+               plus a fixed offset, exactly like spawnRival below,
+               so she starts walking in from off to one side rather
+               than appearing at a fixed VELD landmark. */
+            if(anne_state == 0 && !anne_gifted && !seq_lines && battles >= 1 && map_id == MAP_VELD) {
+                anne_state = 1;
+                anne_x = (float)px;
+                anne_y = (float)py + 45.0f; /* 72 * 0.625 */
+                anne_dir = 1; /* up */
+                anne_anim = 0.0f;
+            }
 
-            if(!seq_lines) {
+            /* ensureSoldiers(): lazily place the 3 FOREST soldiers at
+               their patrol-origin marks the first time the map is
+               entered, matching engine.ts's own lazy build. */
+            if(!soldiers_init && map_id == MAP_FOREST) {
+                int i;
+                for(i = 0; i < 3; i++) {
+                    int sx, sy;
+                    mark_center(MAP_FOREST, SOLDIERS[i].mark, &sx, &sy);
+                    soldiers[i].x = (float)sx;
+                    soldiers[i].y = (float)sy;
+                    soldiers[i].anim = 0.0f;
+                    soldiers[i].chase = 0;
+                }
+                /* Patrol (soldier 0): x-axis, +-90/-10px around spawn
+                   (144/16 * 0.625). Scout (soldier 1): y-axis, +-50px
+                   (80 * 0.625). Sentry (soldier 2): stationary,
+                   facing up -- matches ensureSoldiers()'s 3 entries. */
+                soldiers[0].dir = 3; soldiers[0].axis = 0; soldiers[0].sign = 1;
+                soldiers[0].minv = soldiers[0].x - 10.0f; soldiers[0].maxv = soldiers[0].x + 90.0f;
+                soldiers[1].dir = 2; soldiers[1].axis = 1; soldiers[1].sign = -1;
+                soldiers[1].minv = soldiers[1].y - 50.0f; soldiers[1].maxv = soldiers[1].y + 50.0f;
+                soldiers[2].dir = 1; soldiers[2].axis = 2; soldiers[2].sign = 0;
+                soldiers[2].minv = soldiers[2].maxv = 0.0f;
+                soldiers_init = 1;
+            }
+
+            /* Mason/Anne approach: force-walk toward the player,
+               freezing all other world movement/interaction until
+               they either reach the player (ambush) or the map
+               changes out from under them. Matches engine.ts's own
+               early-return while rival.phase/anne.phase === "approach". */
+            if(mason_state == 1) {
+                float dx = (float)px - mason_x, dy = (float)py - mason_y;
+                float dist = f_sqrt(dx * dx + dy * dy);
+                if(dist < ACTOR_REACH_DIST) {
+                    mason_state = 2;
+                    seq_lines = TALK_MASON_FIGHT;
+                    seq_len = TALK_LEN(TALK_MASON_FIGHT);
+                    seq_beat = 0;
+                    post_action = POST_MASON;
+                }
+                else {
+                    mason_x += dx / dist * ACTOR_SPD_APPROACH;
+                    mason_y += dy / dist * ACTOR_SPD_APPROACH;
+                    mason_dir = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
+                                    ? (dx < 0 ? 2 : 3) : (dy < 0 ? 1 : 0);
+                    mason_anim += 8.0f / 60.0f;
+                }
+            }
+            else if(anne_state == 1) {
+                float dx = (float)px - anne_x, dy = (float)py - anne_y;
+                float dist = f_sqrt(dx * dx + dy * dy);
+                if(dist < ACTOR_REACH_DIST) {
+                    anne_state = 2;
+                    anne_gifted = 1;
+                    bag.gem += 5;
+                    seq_lines = TALK_ANNE_GIFT;
+                    seq_len = TALK_LEN(TALK_ANNE_GIFT);
+                    seq_beat = 0;
+                    post_action = POST_ANNE_LEAVE;
+                }
+                else {
+                    anne_x += dx / dist * ACTOR_SPD_APPROACH;
+                    anne_y += dy / dist * ACTOR_SPD_APPROACH;
+                    anne_dir = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
+                                   ? (dx < 0 ? 2 : 3) : (dy < 0 ? 1 : 0);
+                    anne_anim += 8.0f / 60.0f;
+                }
+            }
+
+            /* Mason/Anne leaving: walk straight down off VELD, only
+               while no dialogue box is up (matches engine.ts's
+               talking()/hudT early-returns sitting ahead of these two
+               blocks in updateWorld()). */
+            if(mason_state == 3 && !seq_lines) {
+                mason_y += ACTOR_SPD_LEAVE;
+                mason_dir = 0;
+                mason_anim += 8.0f / 60.0f;
+                if(mason_y > (float)py + 150.0f) mason_state = 0;
+            }
+            if(anne_state == 3 && !seq_lines) {
+                anne_y += ACTOR_SPD_LEAVE;
+                anne_dir = 0;
+                anne_anim += 8.0f / 60.0f;
+                if(anne_y > (float)py + 150.0f) anne_state = 0;
+            }
+
+            /* Soldiers: patrol their axis, chase on line-of-sight,
+               ambush like Mason once they catch up. Matches
+               updateSoldiers()/soldierLos(). */
+            if(map_id == MAP_FOREST && !seq_lines) {
+                int i;
+                for(i = 0; i < 3; i++) {
+                    Soldier *s = &soldiers[i];
+                    if(soldier_beaten[i]) continue;
+                    if(s->chase) {
+                        float dx = (float)px - s->x, dy = (float)py - s->y;
+                        float dist = f_sqrt(dx * dx + dy * dy);
+                        if(dist < ACTOR_CHASE_CATCH) {
+                            s->chase = 0;
+                            seq_lines = TALK_SOLDIER_SPOT;
+                            seq_len = TALK_LEN(TALK_SOLDIER_SPOT);
+                            seq_beat = 0;
+                            post_action = POST_SOLDIER;
+                            post_soldier_id = i;
+                            break;
+                        }
+                        s->x += dx / dist * ACTOR_SPD_CHASE;
+                        s->y += dy / dist * ACTOR_SPD_CHASE;
+                        s->dir = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
+                                     ? (dx < 0 ? 2 : 3) : (dy < 0 ? 1 : 0);
+                        s->anim += 8.0f / 60.0f;
+                        continue;
+                    }
+                    if(s->axis == 0) {
+                        s->x += s->sign * ACTOR_SPD_PATROL;
+                        if(s->x > s->maxv) { s->x = s->maxv; s->sign = -1; s->dir = 2; }
+                        else if(s->x < s->minv) { s->x = s->minv; s->sign = 1; s->dir = 3; }
+                        s->anim += 4.0f / 60.0f;
+                    }
+                    else if(s->axis == 1) {
+                        s->y += s->sign * ACTOR_SPD_PATROL;
+                        if(s->y > s->maxv) { s->y = s->maxv; s->sign = -1; s->dir = 1; }
+                        else if(s->y < s->minv) { s->y = s->minv; s->sign = 1; s->dir = 0; }
+                        s->anim += 4.0f / 60.0f;
+                    }
+                    if(soldier_los(map_id, s->x, s->y, s->dir, px, py))
+                        s->chase = 1;
+                }
+            }
+
+            if(!seq_lines && mason_state != 1 && anne_state != 1) {
                 int dx = 0, dy = 0;
                 int map_w = MAPS[map_id].cols * TILE;
                 int map_h = MAPS[map_id].rows_n * TILE;
@@ -2769,12 +3046,18 @@ void main(void) {
                     int nx = px + dx * speed;
                     int ny = py + dy * speed;
 
+                    /* hitActor(): a live NPC blocks movement like a
+                       solid tile (see actor_blocks() above). */
                     if(dx != 0 && !tile_blocked(map_id, tile_at(map_id, (nx + (dx > 0 ? 6 : -6)) / TILE,
-                                                                 py / TILE), cath_caught)) {
+                                                                 py / TILE), cath_caught) &&
+                       !actor_blocks(map_id, nx, py, mason_state, mason_x, mason_y,
+                                     anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         px = nx;
                     }
                     if(dy != 0 && !tile_blocked(map_id, tile_at(map_id, px / TILE,
-                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught)) {
+                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught) &&
+                       !actor_blocks(map_id, px, ny, mason_state, mason_x, mason_y,
+                                     anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         py = ny;
                     }
 
@@ -2815,11 +3098,20 @@ void main(void) {
                             seq_lines = TALK_DOOR_OUT;
                             seq_len = TALK_LEN(TALK_DOOR_OUT);
                             seq_beat = 0;
-                            /* footsteps/masonPh=1 in the reference (an
-                               immediate chase-and-ambush) -- this port's
-                               Mason waits at a fixed spot instead, see
-                               the world-NPC section comment. */
-                            mason_spawned = 1;
+                            /* spawnRival()/footsteps: Mason starts
+                               south of the player's new VELD position
+                               and force-walks up to ambush them
+                               (mason_state 1 == "approach"). Guarded
+                               on !beat_mason so re-using this door
+                               after he's already been fought (and left)
+                               doesn't respawn him. */
+                            if(mason_state == 0 && !beat_mason) {
+                                mason_state = 1;
+                                mason_x = (float)px;
+                                mason_y = (float)py + 100.0f; /* 160 * 0.625 */
+                                mason_dir = 1; /* up */
+                                mason_anim = 0.0f;
+                            }
                         }
                     }
                     else if(map_id == MAP_VELD && here == 'D') {
@@ -2875,7 +3167,8 @@ void main(void) {
                            every battle-starting post_action, but not
                            to opening the shop (beginTalkEnd's a==9
                            branch has no such check). */
-                        if(party_n > 0 || post_action == POST_SHOP) {
+                        if(party_n > 0 || post_action == POST_SHOP ||
+                           post_action == POST_MASON_LEAVE || post_action == POST_ANNE_LEAVE) {
                             switch(post_action) {
                                 case POST_CALDER:
                                     battle.foe = mint_monster(SP_RAZORBAT, 4);
@@ -2972,6 +3265,22 @@ void main(void) {
                                     shop_open = 1;
                                     shop_sell_tab = 0;
                                     shop_cur = 0;
+                                    break;
+                                case POST_MASON_LEAVE:
+                                    /* startRivalLeave(). */
+                                    mason_state = 3;
+                                    mason_dir = 0;
+                                    mason_anim = 0.0f;
+                                    break;
+                                case POST_ANNE_LEAVE:
+                                    /* startAnneLeave(). anne_state is
+                                       already 2 from the gift-reach
+                                       trigger above; this just kicks
+                                       off the actual walk-away once
+                                       her gift dialogue has closed. */
+                                    anne_state = 3;
+                                    anne_dir = 0;
+                                    anne_anim = 0.0f;
                                     break;
                                 default:
                                     break;
@@ -3196,81 +3505,52 @@ void main(void) {
                             post_action = POST_CALDER;
                         }
                     }
-                    else if(mason_spawned) {
-                        /* Mason: spawns (mason_spawned) the first time
-                           the player leaves the house, standing at a
-                           fixed VELD spot near the door (see the
-                           world-NPC section comment). Interact
-                           triggers his fight the first time,
-                           masonAfter afterward. This has to be an
-                           else-if chained onto the same a_now check as
-                           every other VELD mark, not a separate `if`
-                           using the same button-press edge -- a
-                           separate `if` re-fired on the very same
-                           press that had just closed a dialogue
+                    else if(mason_state == 2) {
+                        /* Mason: state 2 means he's already force-
+                           walked up and ambushed the player once (see
+                           the actor-movement update above) and is now
+                           standing put until re-approached. Interact
+                           shows masonAfter, which queues his walk-away
+                           (POST_MASON_LEAVE, mason_state 3). This has
+                           to be an else-if chained onto the same a_now
+                           check as every other VELD mark, not a
+                           separate `if` using the same button-press
+                           edge -- a separate `if` re-fired on the very
+                           same press that had just closed a dialogue
                            (seq_lines had already gone back to 0 a few
                            lines above, in this same frame), reopening
                            Mason's dialogue immediately and forever the
-                           moment the player stood near him: closing
-                           masonWin instantly reopened masonAfter,
-                           and closing masonAfter's own last beat
-                           reopened masonAfter again, looping. */
-                        int mx = 15 * TILE + TILE / 2, my = 5 * TILE + TILE / 2;
-                        int ddx = px - mx, ddy = py - my;
-                        if(ddx * ddx + ddy * ddy <= 676) {
-                            if(beat_mason) {
-                                seq_lines = TALK_MASON_AFTER;
-                                seq_len = TALK_LEN(TALK_MASON_AFTER);
-                            }
-                            else {
-                                seq_lines = TALK_MASON_FIGHT;
-                                seq_len = TALK_LEN(TALK_MASON_FIGHT);
-                                post_action = POST_MASON;
-                            }
+                           moment the player stood near him. */
+                        int ddx = px - (int)mason_x, ddy = py - (int)mason_y;
+                        if(ddx * ddx + ddy * ddy <= 676 && beat_mason) {
+                            seq_lines = TALK_MASON_AFTER;
+                            seq_len = TALK_LEN(TALK_MASON_AFTER);
+                            post_action = POST_MASON_LEAVE;
                         }
                     }
-                    else if(anne_spawned) {
-                        /* Anne: spawns (anne_spawned) after the
-                           player's first battle, standing at a fixed
-                           VELD spot distinct from Mason's (see the
-                           world-NPC section comment for the full
-                           story on why she's ported at all). Gift is
-                           one-time (anne_gifted); a repeat visit shows
-                           anneAgain, same as every other repeat-visit
-                           NPC here. */
-                        int ax = 17 * TILE + TILE / 2, ay = 7 * TILE + TILE / 2;
-                        int adx = px - ax, ady = py - ay;
-                        if(adx * adx + ady * ady <= 676) {
-                            if(!anne_gifted) {
-                                anne_gifted = 1;
-                                bag.gem += 5;
-                                seq_lines = TALK_ANNE_GIFT;
-                                seq_len = TALK_LEN(TALK_ANNE_GIFT);
-                            }
-                            else {
-                                seq_lines = TALK_ANNE_AGAIN;
-                                seq_len = TALK_LEN(TALK_ANNE_AGAIN);
-                            }
-                        }
-                    }
+                    /* Anne has no standing/repeat-visit interact of her
+                       own: she force-walks up, gifts, and leaves in
+                       one uninterrupted sequence (see the actor-
+                       movement update above), matching engine.ts --
+                       there's no anne.phase "done, stand and wait"
+                       state to interact with, unlike Mason's. */
                     seq_beat = 0;
                 }
                 else if(map_id == MAP_FOREST) {
-                    /* Soldiers, stationary at their patrol origin marks
-                       (see the section comment above). */
+                    /* Soldiers now patrol/chase for real (see the
+                       actor-movement update above) -- the un-beaten
+                       ambush trigger lives there (soldierLos catching
+                       the player), same as Mason's. This interact
+                       block only covers walking up to one already
+                       beaten, for the repeat-visit flavor line;
+                       engine.ts has no such line, this is a harmless
+                       extra. */
                     int i;
                     for(i = 0; i < 3; i++) {
-                        if(near_mark(map_id, SOLDIERS[i].mark, px, py, 676)) {
-                            if(soldier_beaten[i]) {
-                                seq_lines = TALK_SOLDIER_DONE;
-                                seq_len = TALK_LEN(TALK_SOLDIER_DONE);
-                            }
-                            else {
-                                seq_lines = TALK_SOLDIER_SPOT;
-                                seq_len = TALK_LEN(TALK_SOLDIER_SPOT);
-                                post_action = POST_SOLDIER;
-                                post_soldier_id = i;
-                            }
+                        int ddx = px - (int)soldiers[i].x, ddy = py - (int)soldiers[i].y;
+                        if(soldier_beaten[i] && ddx * ddx + ddy * ddy <= 676) {
+                            seq_lines = TALK_SOLDIER_DONE;
+                            seq_len = TALK_LEN(TALK_SOLDIER_DONE);
                             seq_beat = 0;
                             break;
                         }
@@ -3331,7 +3611,14 @@ void main(void) {
             compute_camera(map_id, px, py, &cam_x, &cam_y);
             draw_map(map_id, cam_x, cam_y);
             draw_props(map_id, cam_x, cam_y);
-            draw_npcs(map_id, cam_x, cam_y, mason_spawned, anne_spawned, cath_caught);
+            {
+                int mason_frame = (mason_state == 1 || mason_state == 3) ? (int)mason_anim % 4 : 0;
+                int anne_frame = (anne_state == 1 || anne_state == 3) ? (int)anne_anim % 4 : 0;
+                draw_npcs(map_id, cam_x, cam_y,
+                          mason_state, mason_x, mason_y, mason_dir, mason_frame,
+                          anne_state, anne_x, anne_y, anne_dir, anne_frame,
+                          cath_caught, soldiers, soldier_beaten);
+            }
             draw_player(px - cam_x, py - cam_y, pdir, anim_counter / 10);
             draw_hud(got_shelf, looted_crate, bag.bandage);
             if(seq_lines)
