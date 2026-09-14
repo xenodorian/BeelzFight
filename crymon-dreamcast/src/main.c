@@ -52,10 +52,30 @@ typedef unsigned int   u32;
 #define PVR_BITMAP_Y         0x0f0
 #define PVR_SYNC_STATUS      0x10c  /* bits 0-8: nonzero while in vblank */
 
-#define VRAM16 ((volatile u16 *)0xa5000000u)
-
 #define SCREEN_W 320
 #define SCREEN_H 240
+
+/* Double buffering: draw into whichever buffer isn't currently being
+   scanned out, then flip PVR_FB_ADDR to it right after a vblank wait.
+   Without this, redrawing on every frame that the player moves writes
+   into the same buffer the display hardware is actively reading from,
+   which is what caused the movement-time flicker/tearing -- the
+   earlier "only redraw when something changed" fix only addressed the
+   at-rest case, since there's nothing to race when nothing redraws.
+   Two 320x240x16bpp buffers (150 KB each) easily fit in the PVR's 8MB
+   VRAM; 0x040000 (256KB) keeps the second buffer clear of the first
+   with room to spare. */
+#define FB_OFFSET0 0x000000u
+#define FB_OFFSET1 0x040000u
+
+static u32 fb_back_offset = FB_OFFSET1;
+static volatile u16 *draw_fb = (volatile u16 *)(0xa5000000u + FB_OFFSET1);
+
+static void fb_flip(void) {
+    PVR(PVR_FB_ADDR) = fb_back_offset;
+    fb_back_offset = (fb_back_offset == FB_OFFSET0) ? FB_OFFSET1 : FB_OFFSET0;
+    draw_fb = (volatile u16 *)(0xa5000000u + fb_back_offset);
+}
 
 /* DM_320x240_NTSC timing parameters, from KallistiOS's vid_builtin table */
 #define SCANLINES 262
@@ -117,13 +137,13 @@ static void wait_vblank(void) {
 static void vram_clear(void) {
     u32 i;
     for(i = 0; i < (u32)SCREEN_W * SCREEN_H; i++)
-        VRAM16[i] = 0x0000;
+        draw_fb[i] = 0x0000;
 }
 
 static void put_pixel(int x, int y, u16 color) {
     if(x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H)
         return;
-    VRAM16[y * SCREEN_W + x] = color;
+    draw_fb[y * SCREEN_W + x] = color;
 }
 
 static void fill_rect(int x, int y, int w, int h, u16 color) {
@@ -397,6 +417,12 @@ static void draw_room_tile(char ch, int dx, int dy) {
 static void draw_house_background(void) {
     int row, col;
 
+    /* The room (280x220) doesn't cover the full 320x240 screen, and
+       with two alternating framebuffers the "other" one was never
+       cleared -- without this, its border margin would show stale
+       content from two frames ago the first time it's drawn into. */
+    vram_clear();
+
     for(row = 0; row < ROOM_ROWS; row++)
         for(col = 0; col < ROOM_COLS; col++)
             draw_room_tile(house_room[row][col],
@@ -516,6 +542,7 @@ void main(void) {
     video_init();
     maple_init();
     draw_press_start();
+    fb_flip();
 
     find_mark('P', &col, &row);
     px = ROOM_OX + col * ROOM_TILE + ROOM_TILE / 2;
@@ -533,6 +560,7 @@ void main(void) {
                 draw_house_background();
                 draw_props();
                 draw_player(px, py, pdir);
+                fb_flip();
             }
         }
         else {
@@ -576,19 +604,26 @@ void main(void) {
                 dialogue = mark ? dialogue_for(mark) : 0;
             }
 
-            /* Redraw only when something actually changed: this is a
-               single, non-double-buffered framebuffer, so repainting
-               it every frame regardless (as the first version of this
-               loop did) races the video hardware's own scanout and
-               shows up as flicker/tearing -- it did not happen in
-               step 1 because that version only ever drew once, right
-               when the room was entered. */
+            /* Redraw (into the back buffer) only when something
+               actually changed -- no point flipping to a frame
+               identical to the one already on screen. Combined with
+               fb_flip() below, this is what actually fixes tearing
+               while moving: each new frame is fully drawn into the
+               buffer NOT currently being scanned out, and only shown
+               once it's complete, instead of being painted piece by
+               piece into the buffer the display is actively reading
+               (which is what the earlier "skip redraw when idle" fix
+               didn't address -- it stopped the idle flicker because
+               there was nothing left to race when nothing redrew, but
+               every frame that *did* redraw during movement was still
+               racing the single on-screen buffer). */
             if(px != old_px || py != old_py || pdir != old_dir || dialogue != old_dialogue) {
                 draw_house_background();
                 draw_props();
                 draw_player(px, py, pdir);
                 if(dialogue)
                     draw_dialogue_box(dialogue);
+                fb_flip();
             }
         }
 
