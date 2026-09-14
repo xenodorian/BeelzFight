@@ -542,6 +542,7 @@ void main(void) {
     video_init();
     maple_init();
     draw_press_start();
+    wait_vblank();
     fb_flip();
 
     find_mark('P', &col, &row);
@@ -549,7 +550,6 @@ void main(void) {
     py = ROOM_OY + row * ROOM_TILE + ROOM_TILE / 2;
 
     for(;;) {
-        wait_vblank();
         raw = maple_poll_buttons();
         start_now = pressed(raw, CONT_START);
         a_now     = pressed(raw, CONT_A);
@@ -560,6 +560,7 @@ void main(void) {
                 draw_house_background();
                 draw_props();
                 draw_player(px, py, pdir);
+                wait_vblank();
                 fb_flip();
             }
         }
@@ -606,23 +607,25 @@ void main(void) {
 
             /* Redraw (into the back buffer) only when something
                actually changed -- no point flipping to a frame
-               identical to the one already on screen. Combined with
-               fb_flip() below, this is what actually fixes tearing
-               while moving: each new frame is fully drawn into the
-               buffer NOT currently being scanned out, and only shown
-               once it's complete, instead of being painted piece by
-               piece into the buffer the display is actively reading
-               (which is what the earlier "skip redraw when idle" fix
-               didn't address -- it stopped the idle flicker because
-               there was nothing left to race when nothing redrew, but
-               every frame that *did* redraw during movement was still
-               racing the single on-screen buffer). */
+               identical to the one already on screen. The vblank wait
+               happens right here, after drawing and immediately before
+               fb_flip(), matching KallistiOS's own vid_flip() usage
+               pattern (draw into the back buffer, vid_waitvbl(), then
+               flip): PVR_FB_ADDR is not hardware-latched to vblank, so
+               the address write has to happen at the vblank boundary
+               itself, not at some arbitrary point after drawing
+               finishes. The previous version waited for vblank at the
+               top of the loop, before drawing, which left the actual
+               fb_flip() (and its PVR_FB_ADDR write) landing wherever
+               drawing happened to finish -- a tear every frame that
+               redrew, which is exactly the movement-time flicker. */
             if(px != old_px || py != old_py || pdir != old_dir || dialogue != old_dialogue) {
                 draw_house_background();
                 draw_props();
                 draw_player(px, py, pdir);
                 if(dialogue)
                     draw_dialogue_box(dialogue);
+                wait_vblank();
                 fb_flip();
             }
         }
