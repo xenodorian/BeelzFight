@@ -10,7 +10,7 @@ $(OBJ): $(SRC)
 
 $(TARGET): $(OBJ) $(CFG)
 	ld65 -C $(CFG) -o $(TARGET) $(OBJ)
-	python3 tools/pad_rom.py $(TARGET) 131072
+	python3 tools/pad_rom.py $(TARGET) 262144
 	python3 tools/fix_checksum.py $(TARGET)
 
 clean:
