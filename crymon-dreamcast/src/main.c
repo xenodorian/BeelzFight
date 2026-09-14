@@ -36,13 +36,16 @@
  *     in full -- see draw_tile); the reference itself does this too
  *     for terrain (draw.lua's paintTile is flat rectangles in the
  *     LÖVE build as well, not a tileset image).
- *   - Dialogue/UI text is upper-cased and stripped of most punctuation
- *     (apostrophes, periods, commas, quotes) to fit this port's own
- *     hand-authored 8x8 bitmap font, which only has A-Z/0-9/space/+/-
- *     //glyphs -- see the font section comment. The reference's actual
- *     mixed-case, fully punctuated TALK_* text is preserved in this
- *     port's own dialogue-array comments where it'd otherwise be
- *     ambiguous, but every on-screen line is the depunctuated version.
+ *   - Dialogue/UI text is upper-cased to fit this port's own hand-
+ *     authored 8x8 bitmap font (no lowercase glyph set -- a real
+ *     mixed-case font is its own separate undertaking), but every
+ *     every TALK_* array (and ENDING_WIN/DEMO_END) now carries the reference's own
+ *     punctuation (apostrophes, periods, commas, question/exclamation
+ *     marks -- see glyph_apostrophe/period/comma/question/exclaim
+ *     near draw_glyph). Characters this font still can't render
+ *     (quotes, colons/semicolons folded to commas, em dashes folded
+ *     to periods) are the only things actually dropped or substituted
+ *     from the source text now.
  */
 
 #include <stdint.h>
@@ -202,9 +205,12 @@ static void blit_sprite(const u16 *px, int w, int h, int x, int y) {
 }
 
 /* ----------------------------------------------------------------------
- * Font: 8x8, 1bpp glyphs, A-Z + space. Bit 7 = leftmost pixel of each
- * row. Enough to render the interact-dialogue lines and the title
- * screen; text is upper-cased and punctuation-free by construction.
+ * Font: 8x8, 1bpp glyphs, A-Z/0-9/space plus a handful of hand-added
+ * symbol glyphs further down (-+/ for stat/damage text, then
+ * '.,?! for real dialogue punctuation). Bit 7 = leftmost pixel of
+ * each row. No lowercase set, so all on-screen text is upper-cased by
+ * construction -- everything else the source text actually uses now
+ * renders as written.
  * ---------------------------------------------------------------------- */
 static const uint8_t font_AZ[26][8] = {
     /* A */ { 0b00111100, 0b01000010, 0b10000001, 0b10000001,
@@ -301,6 +307,29 @@ static const uint8_t glyph_slash[8] = {
     0b00110000, 0b01100000, 0b01000000, 0,
 };
 
+/* Punctuation, added to restore the reference's actual TALK_* text
+   (apostrophes/periods/commas/question and exclamation marks) instead
+   of the all-depunctuated placeholder text this font's original A-Z/
+   0-9/-+/ set forced. Same minimalist style as the digits above (a
+   6-wide glyph inside the 8-wide cell). */
+static const uint8_t glyph_apostrophe[8] = {
+    0b00110000, 0b00110000, 0b00100000, 0, 0, 0, 0, 0,
+};
+static const uint8_t glyph_period[8] = {
+    0, 0, 0, 0, 0, 0, 0b00110000, 0,
+};
+static const uint8_t glyph_comma[8] = {
+    0, 0, 0, 0, 0, 0b00110000, 0b00110000, 0b00100000,
+};
+static const uint8_t glyph_question[8] = {
+    0b00111100, 0b01100110, 0b00001100, 0b00011000,
+    0b00011000, 0, 0b00011000, 0,
+};
+static const uint8_t glyph_exclaim[8] = {
+    0b00011000, 0b00011000, 0b00011000, 0b00011000,
+    0b00011000, 0, 0b00011000, 0,
+};
+
 static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int scale) {
     int row, col, sx, sy;
 
@@ -332,6 +361,16 @@ static void draw_text_s(const char *s, int x, int y, u16 color, int scale) {
             draw_glyph(cx, y, glyph_plus, color, scale);
         else if(*s == '/')
             draw_glyph(cx, y, glyph_slash, color, scale);
+        else if(*s == '\'')
+            draw_glyph(cx, y, glyph_apostrophe, color, scale);
+        else if(*s == '.')
+            draw_glyph(cx, y, glyph_period, color, scale);
+        else if(*s == ',')
+            draw_glyph(cx, y, glyph_comma, color, scale);
+        else if(*s == '?')
+            draw_glyph(cx, y, glyph_question, color, scale);
+        else if(*s == '!')
+            draw_glyph(cx, y, glyph_exclaim, color, scale);
         cx += px;
     }
 }
@@ -976,40 +1015,42 @@ static void draw_player(int cx, int cy, int dir, int anim_frame) {
 
 /* ----------------------------------------------------------------------
  * Interact dialogue: full multi-beat sequences from data.TALK.father /
- * fatherAfter / bed / shelf / shelfEmpty / crate / crateEmpty
- * (love/game/src/data.lua), verbatim except upper-cased and stripped
- * of punctuation our A-Z/0-9-only font can't render. Each sequence is
- * shown one beat per A-press (matching sayn()'s one-beat-per-advance
- * in the reference), word-wrapped into the dialogue box.
+ * fatherAfter / bed / shelf / shelfEmpty / crate / crateEmpty (also
+ * cross-checked against the canonical src/game/data.ts, which is
+ * where every TALK_* array's actual text below was pulled from --
+ * verbatim except upper-cased, our font having no lowercase set).
+ * Each sequence is shown one beat per A-press (matching sayn()'s
+ * one-beat-per-advance in the reference), word-wrapped into the
+ * dialogue box.
  * ---------------------------------------------------------------------- */
 static const char *const TALK_FATHER[] = {
-    "THERES A WAR CRYTOWN IS ALREADY BLEEDING",
-    "YOURE TOO SICK TO DEFEND IT FROM THE SOLDIERS I KNOW THAT",
-    "SO IM STEALING YOUR CRYMON",
-    "FATHER DOES NOT WAKE THE CAPTURE CRYSTAL IS STILL ON THE SHELF",
+    "THERE'S A WAR. CRYTOWN IS ALREADY BLEEDING.",
+    "YOU'RE TOO SICK TO DEFEND IT FROM THE SOLDIERS. I KNOW THAT.",
+    "SO I'M STEALING YOUR CRYMON.",
+    "FATHER DOES NOT WAKE. THE CAPTURE CRYSTAL IS STILL ON THE SHELF.",
 };
 static const char *const TALK_FATHER_AFTER[] = {
-    "I ALREADY TOOK QUILLPUP SLEEP ILL DO THE FIGHTING",
-    "HIS BREATH IS THIN HE DOES NOT ANSWER",
+    "I ALREADY TOOK QUILLPUP. SLEEP. I'LL DO THE FIGHTING.",
+    "HIS BREATH IS THIN. HE DOES NOT ANSWER.",
 };
 static const char *const TALK_BED[] = {
-    "JUST UNTIL THEY BREATHE AGAIN",
-    "MAXS EMPTY BED THE CRYMON SLEEP CUTS CLOSE SPECIALS RETURN",
+    "JUST UNTIL THEY BREATHE AGAIN.",
+    "MAX'S EMPTY BED. THE CRYMON SLEEP. CUTS CLOSE. SPECIALS RETURN.",
 };
 static const char *const TALK_SHELF[] = {
-    "THIS IS IT FATHERS CRYSTAL QUILLPUP IS INSIDE",
-    "THE CRYSTAL BREAKS WARM IN HER HANDS QUILLPUP SHAKES OUT ONTO THE FLOORBOARDS",
-    "YOURE COMING CRYTOWN DOESNT GET TO FALL",
+    "THIS IS IT. FATHER'S CRYSTAL. QUILLPUP IS INSIDE.",
+    "THE CRYSTAL BREAKS WARM IN HER HANDS. QUILLPUP SHAKES OUT ONTO THE FLOORBOARDS.",
+    "YOU'RE COMING. CRYTOWN DOESN'T GET TO FALL.",
 };
 static const char *const TALK_SHELF_EMPTY[] = {
-    "DUST THE CRYSTAL IS ALREADY OPEN",
+    "DUST. THE CRYSTAL IS ALREADY OPEN.",
 };
 static const char *const TALK_CRATE[] = {
-    "A WRAP HE WONT MISS IT",
-    "A LINEN WRAP UNDER THE LID YOU TAKE IT",
+    "A WRAP. HE WON'T MISS IT.",
+    "A LINEN WRAP UNDER THE LID. YOU TAKE IT.",
 };
 static const char *const TALK_CRATE_EMPTY[] = {
-    "SPLINTERS AND A MOTH EMPTY",
+    "SPLINTERS AND A MOTH. EMPTY.",
 };
 
 /* Door/warp flavor lines, data.TALK.doorLocked/doorOut/cottage/
@@ -1018,28 +1059,28 @@ static const char *const TALK_CRATE_EMPTY[] = {
    leave the house; that's NPC/battle content not built yet, so this
    step always shows doorOut's plain flavor text instead. */
 static const char *const TALK_DOOR_LOCKED[] = {
-    "NOT YET FATHERS CRYMON IS STILL ON THE SHELF",
+    "NOT YET. FATHER'S CRYMON IS STILL ON THE SHELF.",
 };
 static const char *const TALK_DOOR_OUT[] = {
-    "NIGHT AIR I CAN DO THIS",
-    "TALL GRASS HIDES CRYMON WREN WEST POND EAST BRAM ON THE PATH CALDER SOUTH",
+    "NIGHT AIR. I CAN DO THIS.",
+    "TALL GRASS HIDES CRYMON. WREN WEST. POND EAST. BRAM ON THE PATH. CALDER SOUTH.",
 };
 static const char *const TALK_COTTAGE[] = {
-    "THE COTTAGE FATHER IN THE BED MY BED SOUTH DOOR LEAVES",
+    "THE COTTAGE. FATHER IN THE BED. MY BED. SOUTH DOOR LEAVES.",
 };
 static const char *const TALK_FOREST_ENTER[] = {
-    "THE TREES CLOSE OVER THE PATH",
-    "TALL GRASS PATROLS IF THEY SEE YOU THEY WILL COME THE PATH KEEPS SOUTH",
+    "THE TREES CLOSE OVER THE PATH.",
+    "TALL GRASS. PATROLS. IF THEY SEE YOU, THEY WILL COME. THE PATH KEEPS SOUTH.",
 };
 static const char *const TALK_FOREST_LEAVE[] = {
-    "BACK TOWARD THE COTTAGE PATH",
+    "BACK TOWARD THE COTTAGE PATH.",
 };
 static const char *const TALK_GROVE_ENTER[] = {
-    "THE GRASS DIES OUT STONE AND HUSH",
-    "NO TALL GRASS SOMETHING WAITS ON THE PATH",
+    "THE GRASS DIES OUT. STONE AND HUSH.",
+    "NO TALL GRASS. SOMETHING WAITS ON THE PATH.",
 };
 static const char *const TALK_GROVE_LEAVE[] = {
-    "BACK UNDER THE TREES",
+    "BACK UNDER THE TREES.",
 };
 
 /* state.lua's bAfter==7 loss handler: "Max" / "We still breathe. Crawl
@@ -1047,178 +1088,178 @@ static const char *const TALK_GROVE_LEAVE[] = {
    already ended (matches say1(G, "Max", ...) running after G.mode is
    set back to MODE.WORLD). */
 static const char *const TALK_LOSS[] = {
-    "WE STILL BREATHE CRAWL BACK",
+    "WE STILL BREATHE. CRAWL BACK.",
 };
 
 /* Remaining data.TALK entries: the VELD/FOREST/GROVE NPCs, Mason,
-   Anne, and Bram's shop-open line. Ported verbatim except upper-cased
-   and stripped of punctuation, same as every TALK_* array above. */
+   Anne, and Bram's shop-open line. Ported verbatim except upper-cased,
+   same as every TALK_* array above. */
 static const char *const TALK_MASON_FIGHT[] = {
-    "YOU WALKED OUT WITH THAT HOUND",
-    "HES MINE",
-    "I ALREADY CAUGHT A CRYMON FIGHT ME",
+    "YOU WALKED OUT WITH THAT HOUND.",
+    "HE'S MINE.",
+    "I ALREADY CAUGHT A CRYMON. FIGHT ME.",
 };
 static const char *const TALK_MASON_AFTER[] = {
-    "FINE CALDER IS STILL SOUTH",
-    "I WONT DIE FIRST",
+    "FINE. CALDER IS STILL SOUTH.",
+    "I WON'T DIE FIRST.",
 };
 static const char *const TALK_MASON_WIN[] = {
-    "MASON SPITS IN THE DIRT THE PATH IS YOURS CALDER STILL WAITS SOUTH",
+    "MASON SPITS IN THE DIRT. THE PATH IS YOURS. CALDER STILL WAITS SOUTH.",
 };
 static const char *const TALK_WREN_FIRST[] = {
-    "TOO YOUNG TAKE THE SALVE CALDER CAMPS SOUTH",
-    "IM NOT TOO YOUNG",
-    "WEST IS IVO EAST IS NELL KEEP THAT HOUND FED",
+    "TOO YOUNG. TAKE THE SALVE. CALDER CAMPS SOUTH.",
+    "I'M NOT TOO YOUNG.",
+    "WEST IS IVO. EAST IS NELL. KEEP THAT HOUND FED.",
 };
 static const char *const TALK_WREN_BEAT[] = {
-    "YOU BEAT HIM THE WAR STILL WANTS MORE OF US",
-    "THEN IT CAN WAIT",
+    "YOU BEAT HIM. THE WAR STILL WANTS MORE OF US.",
+    "THEN IT CAN WAIT.",
 };
 static const char *const TALK_WREN_CART[] = {
-    "YOU FOUND THEIR LETTER THEY ALREADY KNEW YOUR NAME",
-    "I READ IT ANYWAY",
+    "YOU FOUND THEIR LETTER. THEY ALREADY KNEW YOUR NAME.",
+    "I READ IT ANYWAY.",
 };
 static const char *const TALK_WREN_HEAL[] = {
-    "CUTS BOUND SPECIALS RETURN KEEP THEM FED",
-    "THANK YOU",
+    "CUTS BOUND. SPECIALS RETURN. KEEP THEM FED.",
+    "THANK YOU.",
 };
 static const char *const TALK_MAE_FIRST[] = {
-    "YOURE MAX I WATCHED YOU LEAVE THE HOUSE",
-    "DONT FOLLOW ME",
-    "I WONT TAKE THE WRAP WREN HEALS I JUST DIDNT WANT THE PATH EMPTY",
+    "YOU'RE MAX. I WATCHED YOU LEAVE THE HOUSE.",
+    "DON'T FOLLOW ME.",
+    "I WON'T. TAKE THE WRAP. WREN HEALS. I JUST DIDN'T WANT THE PATH EMPTY.",
 };
 static const char *const TALK_MAE_AGAIN[] = {
-    "ILL BE HERE SOUTH STILL DRUMS",
-    "I HEAR THEM",
+    "I'LL BE HERE. SOUTH STILL DRUMS.",
+    "I HEAR THEM.",
 };
 static const char *const TALK_IVO_FIRST[] = {
-    "CAMP TOOK MY CRYMON CHEW THIS CALDER SITS SOUTH",
-    "IM GOING SOUTH ANYWAY",
-    "DONT GIVE HIM A CLEAN FIGHT",
+    "CAMP TOOK MY CRYMON. CHEW THIS. CALDER SITS SOUTH.",
+    "I'M GOING SOUTH ANYWAY.",
+    "DON'T GIVE HIM A CLEAN FIGHT.",
 };
 static const char *const TALK_IVO_AGAIN[] = {
-    "HIT FIRST RUN IF THE BAT FOLDS YOU",
-    "I DONT RUN YET",
+    "HIT FIRST. RUN IF THE BAT FOLDS YOU.",
+    "I DON'T RUN YET.",
 };
 static const char *const TALK_NELL_FIRST[] = {
-    "TOO YOUNG DRINK THIS ANYWAY REEDS HIDE A STONE",
-    "I CAN HOLD A CRYSTAL",
+    "TOO YOUNG. DRINK THIS ANYWAY. REEDS HIDE A STONE.",
+    "I CAN HOLD A CRYSTAL.",
 };
 static const char *const TALK_NELL_BONUS[] = {
-    "THAT MOTH WASNT YOURS YESTERDAY ANOTHER SALVE",
-    "I CAUGHT IT FAIR",
+    "THAT MOTH WASN'T YOURS YESTERDAY. ANOTHER SALVE.",
+    "I CAUGHT IT FAIR.",
 };
 static const char *const TALK_NELL_AGAIN[] = {
-    "THE POND KEEPS SECRETS SOUTH STILL DRUMS",
-    "I HEAR THEM",
+    "THE POND KEEPS SECRETS. SOUTH STILL DRUMS.",
+    "I HEAR THEM.",
 };
 static const char *const TALK_PIKE_FIRST[] = {
-    "I DROPPED A MOONSTONE IN THE EAST REEDS DONT TELL WREN",
-    "I WONT TELL WREN",
+    "I DROPPED A MOONSTONE IN THE EAST REEDS. DON'T TELL WREN.",
+    "I WON'T TELL WREN.",
 };
 static const char *const TALK_PIKE_HELP[] = {
-    "YOU FOUND IT KEEP THE STONE TAKE THIS WRAP",
-    "I WAS ONLY LOOKING",
+    "YOU FOUND IT? KEEP THE STONE. TAKE THIS WRAP.",
+    "I WAS ONLY LOOKING.",
 };
 static const char *const TALK_PIKE_DONE[] = {
-    "THE CLIFFS ARE JUST ROCKS THE WAR IS THE SCARY PART",
-    "I KNOW",
+    "THE CLIFFS ARE JUST ROCKS. THE WAR IS THE SCARY PART.",
+    "I KNOW.",
 };
 static const char *const TALK_PIKE_HINT[] = {
-    "EAST OF THE PATH IN THE TALL GRASS BY THE WATER",
+    "EAST OF THE PATH. IN THE TALL GRASS BY THE WATER.",
 };
 static const char *const TALK_HERB[] = {
-    "BITTERROOT STR+4 IF I LAST",
+    "BITTERROOT. STR +4 IF I LAST.",
 };
 static const char *const TALK_HERB_GONE[] = {
-    "A HOLE WHERE THE HERB WAS ONLY GRIT",
+    "A HOLE WHERE THE HERB WAS. ONLY GRIT.",
 };
 static const char *const TALK_GEM_PIKE[] = {
-    "PIKES MOONSTONE HE SAID KEEP IT",
+    "PIKE'S MOONSTONE. HE SAID KEEP IT.",
 };
 static const char *const TALK_GEM_WILD[] = {
-    "A CAPTURE CRYSTAL SOMEONE SMALL LOST THIS",
+    "A CAPTURE CRYSTAL. SOMEONE SMALL LOST THIS.",
 };
 static const char *const TALK_GEM_GONE[] = {
-    "MUD AND A FROG THE STONE IS ALREADY MINE",
+    "MUD AND A FROG. THE STONE IS ALREADY MINE.",
 };
 static const char *const TALK_STUMP[] = {
-    "A WRAP JAMMED IN THE STUMP I TAKE IT",
+    "A WRAP JAMMED IN THE STUMP. I TAKE IT.",
 };
 static const char *const TALK_STUMP_GONE[] = {
-    "JUST A STUMP ANTS NO MORE CLOTH",
+    "JUST A STUMP. ANTS. NO MORE CLOTH.",
 };
 static const char *const TALK_CART[] = {
-    "THEY ALREADY KNEW MY NAME",
-    "A CAMP LETTER ON THE WRECK SEND THE COTTAGE GIRL SOUTH WE NEED BODIES",
+    "THEY ALREADY KNEW MY NAME.",
+    "A CAMP LETTER ON THE WRECK, SEND THE COTTAGE GIRL SOUTH. WE NEED BODIES.",
 };
 static const char *const TALK_CALDER_AFTER[] = {
-    "SOUTH IS THE CAMP DONT DIE STUPID",
-    "I DONT PLAN TO",
+    "SOUTH IS THE CAMP. DON'T DIE STUPID.",
+    "I DON'T PLAN TO.",
 };
 static const char *const TALK_CALDER_FIGHT[] = {
-    "THE CAMP TAKES STRAYS",
-    "IM NOT STRAY",
+    "THE CAMP TAKES STRAYS.",
+    "I'M NOT STRAY.",
 };
 static const char *const TALK_CATHLEEN_SPOT[] = {
-    "YOU WALKED THE PATH I AM THE PATHS ANSWER",
-    "YOURE A CRYMON",
-    "I AM CATHLEEN I FIGHT AS MYSELF",
+    "YOU WALKED THE PATH. I AM THE PATH'S ANSWER.",
+    "YOU'RE A CRYMON.",
+    "I AM CATHLEEN. I FIGHT AS MYSELF.",
 };
 static const char *const TALK_CATHLEEN_AFTER[] = {
-    "YOU STAND COME AGAIN IF YOU MEAN TO KEEP ME",
-    "I MIGHT",
+    "YOU STAND. COME AGAIN IF YOU MEAN TO KEEP ME.",
+    "I MIGHT.",
 };
 static const char *const TALK_CATHLEEN_GONE[] = {
-    "ONLY THE HOODS SHADOW SHES WITH ME NOW",
+    "ONLY THE HOOD'S SHADOW. SHE'S WITH ME NOW.",
 };
 static const char *const TALK_SHINIGAMI_SPOT[] = {
-    "THREE NAMES THREE GRAVES I KEEP THEM",
-    "YOURE IN THE WAY",
-    "CRYMARE COME",
+    "THREE NAMES. THREE GRAVES. I KEEP THEM.",
+    "YOU'RE IN THE WAY.",
+    "CRYMARE. COME.",
 };
 static const char *const TALK_SHINIGAMI_DONE[] = {
-    "THE GRAVES ARE QUIET GO",
+    "THE GRAVES ARE QUIET. GO.",
 };
 static const char *const TALK_SOLDIER_SPOT[] = {
-    "A SOLDIER SEES YOU YOU THERE THIS WOOD IS CAMP GROUND",
-    "IM PASSING THROUGH",
+    "A SOLDIER SEES YOU. YOU THERE! THIS WOOD IS CAMP GROUND.",
+    "I'M PASSING THROUGH.",
 };
 static const char *const TALK_SOLDIER_DONE[] = {
-    "THEY ALREADY LOST THEY WILL NOT RISE",
+    "THEY ALREADY LOST. THEY WILL NOT RISE.",
 };
 /* finishWin()'s soldier branch uses a raw say1() string identical to
    TALK.soldierAfter's text rather than the table entry itself -- the
    source has both; we just use one array for it. */
 static const char *const TALK_SOLDIER_AFTER[] = {
-    "THE SOLDIER SITS GO BEFORE I CHANGE MY MIND",
+    "THE SOLDIER SITS. GO. BEFORE I CHANGE MY MIND.",
 };
 static const char *const TALK_BRAM_OPEN[] = {
-    "MARKS FOR MOSS WRAPS STONES BUY OR SELL",
-    "I HAVE CUTS I NEED STONES",
+    "MARKS FOR MOSS, WRAPS, STONES. BUY OR SELL.",
+    "I HAVE CUTS. I NEED STONES.",
 };
 /* data.TALK.anneGift/anneAgain: Anne is reachable after all -- see the
    world-NPC section comment further down for the correction (the
    canonical src/game/engine.ts calls maybeStartAnne(); only the Lua
    intermediate's own call site was missing). */
 static const char *const TALK_ANNE_GIFT[] = {
-    "MAX YOU ACTUALLY FOUGHT",
-    "TAKE THESE FIVE CRYSTALS DONT WASTE THEM ON THE FIRST MOTH",
-    "I WONT",
-    "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAXS PALM CRYSTALS+5",
+    "MAX. YOU ACTUALLY FOUGHT.",
+    "TAKE THESE. FIVE CRYSTALS. DON'T WASTE THEM ON THE FIRST MOTH.",
+    "I WON'T.",
+    "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAX'S PALM. XTALS +5.",
 };
 /* data.ENDING_WIN / data.DEMO_END, shown by the new ending screen
    (draw_ending() in main()) after beating Calder / Shinigami. */
 static const char *const ENDING_WIN[] = {
-    "CALDER SITS IN THE MUD AND LAUGHS ONCE WITHOUT HUMOUR",
-    "FINE THE CAMP TAKES STRAYS KEEP THAT HOUND CLOSE THE WAR DOES NOT CARE THAT YOU ARE EIGHT",
-    "SOUTH DRUMS MAX CHECKS THE CRYSTALS THEY ARE FEWER THAN SHE THOUGHT",
-    "CRYMON THE ROAD CONTINUES WALK CATCH SURVIVE",
+    "CALDER SITS IN THE MUD AND LAUGHS ONCE, WITHOUT HUMOUR.",
+    "FINE. THE CAMP TAKES STRAYS. KEEP THAT HOUND CLOSE. THE WAR DOES NOT CARE THAT YOU ARE EIGHT.",
+    "SOUTH, DRUMS. MAX CHECKS THE CRYSTALS. THEY ARE FEWER THAN SHE THOUGHT.",
+    "CRYMON. THE ROAD CONTINUES. WALK. CATCH. SURVIVE.",
 };
 static const char *const DEMO_END[] = {
-    "SHINIGAMI KNEELS THE MARES FADE BACK INTO FOG",
-    "THE GROVE GOES QUIET THE GRAVES KEEP THEIR NAMES",
-    "THANK YOU FOR PLAYING THE DEMO OF CRYMON",
+    "SHINIGAMI KNEELS. THE MARES FADE BACK INTO FOG.",
+    "THE GROVE GOES QUIET. THE GRAVES KEEP THEIR NAMES.",
+    "THANK YOU FOR PLAYING THE DEMO OF CRYMON.",
 };
 
 #define TALK_LEN(arr) (int)(sizeof(arr) / sizeof((arr)[0]))
