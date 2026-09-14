@@ -61,6 +61,7 @@ NPCS = {
     'mason':   'mason/down-1.png',
     'soldier': 'npc/soldier/down-1.png',
     'shinigami': 'shinigami/down-1.png',
+    'anne':      'anne/down-1.png',
 }
 
 # Cathleen has no small walk sprite (she "fights as herself" -- her

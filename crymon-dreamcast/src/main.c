@@ -17,16 +17,17 @@
  * Known, deliberate departures from the reference -- each is also
  * called out inline at the relevant code, this is just the index:
  *   - No real-time chase AI: state.lua's soldiers (patrol + line-of-
- *     sight + chase) and Mason (force-walks toward the player after
- *     the house door) are ported as stationary proximity-interact
- *     NPCs instead -- see the world-NPC section comment. The
- *     mechanical outcome (you cannot reach Calder without fighting
- *     them) is unchanged; only the chase presentation is cut.
- *   - Anne is not ported at all: state.lua's maybeAnne(), the only
- *     code that would ever spawn her, is never called from anywhere
- *     in the source -- checked directly, not inferred. She is
- *     unreachable in the reference as shipped, so omitting her is the
- *     faithful port.
+ *     sight + chase), Mason (force-walks toward the player after the
+ *     house door), and Anne (same, after your first battle) are
+ *     ported as stationary proximity-interact NPCs instead -- see the
+ *     world-NPC section comment. The mechanical outcome (you cannot
+ *     reach Calder without fighting the soldiers/Mason; Anne's gift
+ *     is still obtainable) is unchanged; only the chase presentation
+ *     is cut.
+ *   - Anne IS ported -- a correction from an earlier pass here that
+ *     wrongly concluded she was unreachable (see the world-NPC
+ *     section comment for the full story: the Lua intermediate is
+ *     missing a call site the canonical engine.ts actually has).
  *   - Cathleen fights using the generic wild-monster basic/special AI
  *     (her SPECIES entry's real move names still show correctly),
  *     not her unique castSpell() kit (Fire Bolt/Ice Beam/Lightning
@@ -55,7 +56,9 @@
  *     anyway), and every fightable species' battle art (single frame)
  *     all use real pixel art now (tools/gen_sprites.py, from
  *     public/sprites/ -- see draw_player/draw_npcs/
- *     MONSTER_SPRITES/draw_battle_foe_sprite). Map tiles still draw
+ *     MONSTER_SPRITES/draw_battle_sprites, the latter now drawing
+ *     both the foe and the player's own active CryMon). Map tiles
+ *     still draw
  *     as flat color blocks (paintTile's own palette, ported in full
  *     -- see draw_tile); the reference itself does this too for
  *     terrain (draw.lua's paintTile is flat rectangles in the LÖVE
@@ -878,7 +881,8 @@ static void draw_npc(int map_id, char mark, const u16 *px, int w, int h, int cam
     blit_sprite(px, w, h, cx - cam_x - w / 2, cy - cam_y - h);
 }
 
-static void draw_npcs(int map_id, int cam_x, int cam_y, int mason_spawned, int cath_caught) {
+static void draw_npcs(int map_id, int cam_x, int cam_y, int mason_spawned,
+                       int anne_spawned, int cath_caught) {
     if(map_id == MAP_VELD) {
         draw_npc(map_id, 'K', npc_wren, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
         draw_npc(map_id, 'I', npc_mae, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
@@ -891,6 +895,11 @@ static void draw_npcs(int map_id, int cam_x, int cam_y, int mason_spawned, int c
             int mx = 15 * TILE + TILE / 2, my = 5 * TILE + TILE / 2;
             blit_sprite(npc_mason, NPC_SPRITE_W, NPC_SPRITE_H,
                         mx - cam_x - NPC_SPRITE_W / 2, my - cam_y - NPC_SPRITE_H);
+        }
+        if(anne_spawned) {
+            int ax = 17 * TILE + TILE / 2, ay = 7 * TILE + TILE / 2;
+            blit_sprite(npc_anne, NPC_SPRITE_W, NPC_SPRITE_H,
+                        ax - cam_x - NPC_SPRITE_W / 2, ay - cam_y - NPC_SPRITE_H);
         }
     }
     else if(map_id == MAP_FOREST) {
@@ -1150,9 +1159,20 @@ static const char *const TALK_BRAM_OPEN[] = {
     "MARKS FOR MOSS WRAPS STONES BUY OR SELL",
     "I HAVE CUTS I NEED STONES",
 };
-/* data.TALK.anneGift/anneAgain are NOT ported: Anne is unreachable in
-   the reference as shipped (see the world-NPC section comment further
-   down for why), so there is nothing that would ever show this text. */
+/* data.TALK.anneGift/anneAgain: Anne is reachable after all -- see the
+   world-NPC section comment further down for the correction (the
+   canonical src/game/engine.ts calls maybeStartAnne(); only the Lua
+   intermediate's own call site was missing). */
+static const char *const TALK_ANNE_GIFT[] = {
+    "MAX YOU ACTUALLY FOUGHT",
+    "TAKE THESE FIVE CRYSTALS DONT WASTE THEM ON THE FIRST MOTH",
+    "I WONT",
+    "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAXS PALM CRYSTALS+5",
+};
+static const char *const TALK_ANNE_AGAIN[] = {
+    "DONT LOSE THOSE CALDER IS STILL SOUTH",
+    "I KNOW THE WAY",
+};
 
 /* data.ENDING_WIN / data.DEMO_END, shown by the new ending screen
    (draw_ending() in main()) after beating Calder / Shinigami. */
@@ -1884,60 +1904,93 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 }
 
 /* ----------------------------------------------------------------------
- * Battle drawing: one full-screen panel (draw_menu_frame's style)
- * whose content depends on b->phase -- a status header (both HP bars)
- * stays up throughout, with either the current message, or the
- * item/attack/guard menu with a ">" cursor, or the special-move timing
- * bar underneath.
+ * Battle drawing. Unlike the bag/party/shop menus (one big centered
+ * panel -- fine for those, they have no background scene behind
+ * them), this uses drawBattle()'s own layout: small boxed status
+ * readouts and a content box, both far short of the full screen, so
+ * the battle-bg.png background and both sprites stay visible in
+ * between them. Boxes use draw_box (all 4 sides bordered, matching
+ * draw.lua's draw.box) rather than draw_menu_frame's top/bottom-only
+ * style used elsewhere.
  * ---------------------------------------------------------------------- */
-#define BATTLE_CONTENT_Y (MENU_Y + 56)
+static void draw_box(int x, int y, int w, int h) {
+    fill_rect(x, y, w, h, rgb565(18, 17, 14));
+    fill_rect(x, y, w, 2, rgb565(197, 206, 198));
+    fill_rect(x, y + h - 2, w, 2, rgb565(197, 206, 198));
+    fill_rect(x, y, 2, h, rgb565(197, 206, 198));
+    fill_rect(x + w - 2, y, 2, h, rgb565(197, 206, 198));
+}
+
+#define BFOE_BOX_X    4
+#define BFOE_BOX_Y    4
+#define BFOE_BOX_W    172
+#define BFOE_BOX_H    32
+#define BPL_BOX_X     4
+#define BPL_BOX_Y     40
+#define BPL_BOX_W     172
+#define BPL_BOX_H     32
+#define BSPRITE_X     (SCREEN_W - 8 - MONSTER_SPRITE_W)
+#define BFOE_SPRITE_Y 4
+#define BPL_SPRITE_Y  (BFOE_SPRITE_Y + MONSTER_SPRITE_H + 4)
+#define BCONTENT_X    4
+#define BCONTENT_Y    (BPL_SPRITE_Y + MONSTER_SPRITE_H + 8)
+#define BCONTENT_W    (SCREEN_W - 8)
+#define BCONTENT_H    (SCREEN_H - 4 - BCONTENT_Y)
+#define BROW_H        16
 
 /* Index order matches SP_QUILLPUP..SP_CRYMARE and gen_sprites.py's
-   MONSTERS list. No player-side battle sprite here (screen space):
-   the player's walk sprite is already constantly visible on the
-   world map, so the foe -- the thing battle screens actually need
-   art for -- gets the space instead. */
+   MONSTERS list. Used for both the foe's sprite and -- new here --
+   "Max's CryMon" (the player's own active monster; Max herself
+   already has her own walk sprite on the world map, so this is what
+   "the player's battle sprite" actually means in this game). */
 static const u16 *const MONSTER_SPRITES[11] = {
     monster_quillpup, monster_glimmoth, monster_tortcask, monster_razorbat,
     monster_mossback, monster_briarfox, monster_fenwisp, monster_duskhorn,
     monster_needleroot, monster_cathleen, monster_crymare,
 };
 
-static void draw_battle_foe_sprite(const Battle *b) {
-    int x = MENU_X + MENU_W - 8 - MONSTER_SPRITE_W;
-    int y = MENU_Y + 4;
-    blit_sprite(MONSTER_SPRITES[b->foe.species], MONSTER_SPRITE_W, MONSTER_SPRITE_H, x, y);
+static void draw_battle_sprites(const Battle *b) {
+    blit_sprite(MONSTER_SPRITES[b->foe.species], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                BSPRITE_X, BFOE_SPRITE_Y);
+    blit_sprite(MONSTER_SPRITES[b->pl.species], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                BSPRITE_X, BPL_SPRITE_Y);
 }
 
 static void draw_battle_status(const Battle *b) {
     char buf[40];
     int n;
 
+    draw_box(BFOE_BOX_X, BFOE_BOX_Y, BFOE_BOX_W, BFOE_BOX_H);
     n = s_cat(buf, 0, SPECIES[b->foe.species].name);
     n = s_cat(buf, n, " LV");
     n = s_cat_uint(buf, n, b->foe.lv);
-    n = s_cat(buf, n, " HP ");
+    buf[n] = 0;
+    draw_text_s(buf, BFOE_BOX_X + 6, BFOE_BOX_Y + 4, rgb565(232, 228, 216), MENU_SCALE);
+    n = s_cat(buf, 0, "HP ");
     n = s_cat_uint(buf, n, b->foe.hp);
     n = s_cat(buf, n, "/");
     n = s_cat_uint(buf, n, b->foe.maxHp);
     buf[n] = 0;
-    draw_text_s(buf, MENU_X + 8, MENU_Y + 8, rgb565(197, 206, 198), MENU_SCALE);
+    draw_text_s(buf, BFOE_BOX_X + 6, BFOE_BOX_Y + 4 + MENU_ROW_H, rgb565(197, 206, 198), MENU_SCALE);
 
+    draw_box(BPL_BOX_X, BPL_BOX_Y, BPL_BOX_W, BPL_BOX_H);
     n = s_cat(buf, 0, SPECIES[b->pl.species].name);
     n = s_cat(buf, n, " LV");
     n = s_cat_uint(buf, n, b->pl.lv);
-    n = s_cat(buf, n, " HP ");
+    buf[n] = 0;
+    draw_text_s(buf, BPL_BOX_X + 6, BPL_BOX_Y + 4, rgb565(232, 228, 216), MENU_SCALE);
+    n = s_cat(buf, 0, "HP ");
     n = s_cat_uint(buf, n, b->pl.hp);
     n = s_cat(buf, n, "/");
     n = s_cat_uint(buf, n, b->pl.maxHp);
     buf[n] = 0;
-    draw_text_s(buf, MENU_X + 8, MENU_Y + 8 + MENU_ROW_H, rgb565(232, 228, 216), MENU_SCALE);
+    draw_text_s(buf, BPL_BOX_X + 6, BPL_BOX_Y + 4 + MENU_ROW_H, rgb565(197, 206, 198), MENU_SCALE);
 }
 
 static void draw_battle_menu_row(const char *label, int idx, int cur, int y) {
     u16 color = (idx == cur) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
-    draw_text_s(idx == cur ? ">" : " ", MENU_X + 8, y, color, MENU_SCALE);
-    draw_text_s(label, MENU_X + 16, y, color, MENU_SCALE);
+    draw_text_s(idx == cur ? ">" : " ", BCONTENT_X + 8, y, color, MENU_SCALE);
+    draw_text_s(label, BCONTENT_X + 16, y, color, MENU_SCALE);
 }
 
 /* Row count/kind-at-cursor for the item menu, kept in exact lockstep
@@ -1972,7 +2025,7 @@ static int battle_item_menu_kind(const Bag *bag, int idx) {
    fillItemMenu's wild-battle branch (the trainer branch, plain
    "Capture Crystal xN", is dead code here -- b->wild is always 1). */
 static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
-    int y = BATTLE_CONTENT_Y;
+    int y = BCONTENT_Y + 8;
     int i = 0;
     char buf[40];
     int n;
@@ -2015,7 +2068,7 @@ static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
 }
 
 static void draw_battle_atk_menu(const Battle *b, int cur) {
-    int y = BATTLE_CONTENT_Y;
+    int y = BCONTENT_Y + 8;
     char buf[32];
     int n;
 
@@ -2033,14 +2086,14 @@ static void draw_battle_atk_menu(const Battle *b, int cur) {
 }
 
 static void draw_battle_guard_menu(int cur) {
-    int y = BATTLE_CONTENT_Y;
+    int y = BCONTENT_Y + 8;
     draw_battle_menu_row("DODGE AGI", 0, cur, y); y += MENU_ROW_H;
     draw_battle_menu_row("BLOCK STR", 1, cur, y); y += MENU_ROW_H;
     draw_battle_menu_row("BARRIER SPC", 2, cur, y);
 }
 
 static void draw_battle_minigame(const Battle *b) {
-    int bar_x = MENU_X + 8, bar_y = BATTLE_CONTENT_Y + 8, bar_w = MENU_W - 16, bar_h = 10;
+    int bar_x = BCONTENT_X + 8, bar_y = BCONTENT_Y + 16, bar_w = BCONTENT_W - 16, bar_h = 10;
     int needle_x = bar_x + (int)(b->mg * (float)bar_w / 100.0f);
 
     fill_rect(bar_x, bar_y, bar_w, bar_h, rgb565(40, 38, 32));
@@ -2049,30 +2102,27 @@ static void draw_battle_minigame(const Battle *b) {
     fill_rect(bar_x + (int)(0.46f * (float)bar_w), bar_y,
               (int)(0.08f * (float)bar_w), bar_h, rgb565(197, 206, 198));
     fill_rect(needle_x - 1, bar_y - 4, 2, bar_h + 8, 0xFFFF);
-    draw_text_s("A TO STRIKE", MENU_X + 8, bar_y + bar_h + 8, rgb565(138, 134, 120), MENU_SCALE);
+    draw_text_s("A TO STRIKE", BCONTENT_X + 8, bar_y + bar_h + 8, rgb565(138, 134, 120), MENU_SCALE);
 }
 
 /* drawBattle()'s full-screen background, drawn before the status
-   boxes and menu -- also covers the letterboxing gap around the menu
-   panel (draw_menu_frame's box doesn't span the full screen) that the
-   world map would otherwise still be visible through. */
+   boxes/sprites/content box, all of which are individually small so
+   the background (and both battle sprites) stay visible around them
+   -- see the section comment above. */
 static void draw_battle_bg(void) {
     blit_sprite(battle_bg, BATTLE_BG_W, BATTLE_BG_H, 0, 0);
 }
 
 static void draw_battle(const Battle *b, const Bag *bag) {
     draw_battle_bg();
-    draw_menu_frame(b->phase == 0 ? "BATTLE" :
-                     b->phase == 1 ? "ITEM" :
-                     b->phase == 2 ? "ATTACK" :
-                     b->phase == 3 ? "GUARD" : "QUILLBURST");
     draw_battle_status(b);
-    draw_battle_foe_sprite(b);
+    draw_battle_sprites(b);
+    draw_box(BCONTENT_X, BCONTENT_Y, BCONTENT_W, BCONTENT_H);
 
     switch(b->phase) {
         case 0:
-            draw_wrapped(b->msg[b->msg_i], MENU_X + 8, BATTLE_CONTENT_Y,
-                         rgb565(232, 228, 216), MENU_SCALE, MENU_W / 8 - 2, 9);
+            draw_wrapped(b->msg[b->msg_i], BCONTENT_X + 8, BCONTENT_Y + 8,
+                         rgb565(232, 228, 216), MENU_SCALE, BCONTENT_W / 8 - 2, 9);
             break;
         case 1:
             draw_battle_item_menu(b, bag, b->cur);
@@ -2110,14 +2160,21 @@ static void draw_battle(const Battle *b, const Bag *bag) {
  * have caught them anyway); soldiers stand at their own patrol
  * origins (data.spawnOf(FOREST, "1"/"2"/"3")).
  *
- * Anne is not ported at all: state.lua defines maybeAnne() (the only
- * code that would ever set G.annePh away from 0, spawning her) but
- * never calls it from anywhere in state.lua or input.lua -- checked
- * directly against the source, not inferred. G.annePh only otherwise
- * changes once it's already non-zero. She is unreachable in the
- * reference as shipped, so leaving her out (her TALK text included --
- * see the note near TALK_BRAM_OPEN above) is the faithful port, not a
- * cut corner.
+ * Anne, corrected: an earlier pass here concluded she was unreachable
+ * because state.lua defines maybeAnne() but never calls it from
+ * anywhere in state.lua or input.lua (true, checked directly). What
+ * that pass missed is that state.lua's own header names
+ * src/game/engine.ts as the single source of truth this Lua is
+ * ported from, and engine.ts's equivalent, maybeStartAnne(), IS
+ * called -- from updateWorld() every frame (gated on
+ * !talking() && hudT<=0) and after cycling the party. So the Lua
+ * intermediate has a real porting gap (a missing call site), not the
+ * TS/canonical game; the faithful port includes Anne. Ported the same
+ * way as Mason/soldiers above: stationary once spawned (battles >= 1
+ * while on VELD, matching maybeStartAnne's gate -- data.lua's
+ * anneGift text and TALK_ANNE_GIFT above are ported from the Lua
+ * table, which matches the TS text) rather than her walk-toward-the-
+ * player chase, at a fixed VELD spot distinct from Mason's.
  * ---------------------------------------------------------------------- */
 static int near_mark(int map_id, char mark, int px, int py, int radius_sq) {
     int mx, my, dx, dy;
@@ -2357,6 +2414,15 @@ void main(void) {
     int mason_spawned = 0;
     int soldier_beaten[3] = { 0, 0, 0 };
 
+    /* Anne: engine.ts's maybeStartAnne() gate is battlesDone>=1 while
+       on VELD (onBattleOver()/battlesDone++ fires on soldier, Mason,
+       and generic wild wins -- not Calder or Shinigami, matching the
+       Lua port's own audited note on selective battlesDone calls).
+       anne_spawned latches on once that's true, same pattern as
+       mason_spawned. */
+    int battles = 0;
+    int anne_spawned = 0, anne_gifted = 0;
+
     /* Shop (Bram) and ending screens. */
     int shop_open = 0, shop_sell_tab = 0, shop_cur = 0;
     int ending_mode = 0; /* 0 none, 1 ENDING_WIN, 2 DEMO_END */
@@ -2446,6 +2512,7 @@ void main(void) {
                                 else if(battle.trainer_kind == TRAINER_SOLDIER) {
                                     soldier_beaten[battle.soldier_id] = 1;
                                     marks += 8;
+                                    battles++;
                                     in_battle = 0;
                                     enc_lock = 3;
                                     seq_lines = TALK_SOLDIER_AFTER;
@@ -2455,6 +2522,7 @@ void main(void) {
                                 else if(battle.trainer_kind == TRAINER_MASON) {
                                     beat_mason = 1;
                                     marks += 10;
+                                    battles++;
                                     in_battle = 0;
                                     enc_lock = 3;
                                     seq_lines = TALK_MASON_WIN;
@@ -2471,6 +2539,7 @@ void main(void) {
                                 else {
                                     int n;
                                     marks += 3;
+                                    battles++;
                                     if(battle.foe.species == SP_CATHLEEN) {
                                         seq_lines = TALK_CATHLEEN_AFTER;
                                         seq_len = TALK_LEN(TALK_CATHLEEN_AFTER);
@@ -2664,6 +2733,12 @@ void main(void) {
                processed in MODE.WALK). */
             if(door_lock > 0)
                 door_lock--;
+
+            /* maybeStartAnne(): battlesDone>=1 while on VELD, gated
+               on not already talking (matches its !talking() check
+               closely enough -- see the world-NPC section comment). */
+            if(!anne_spawned && !seq_lines && battles >= 1 && map_id == MAP_VELD)
+                anne_spawned = 1;
 
             if(!seq_lines) {
                 int dx = 0, dy = 0;
@@ -3154,6 +3229,30 @@ void main(void) {
                             }
                         }
                     }
+                    else if(anne_spawned) {
+                        /* Anne: spawns (anne_spawned) after the
+                           player's first battle, standing at a fixed
+                           VELD spot distinct from Mason's (see the
+                           world-NPC section comment for the full
+                           story on why she's ported at all). Gift is
+                           one-time (anne_gifted); a repeat visit shows
+                           anneAgain, same as every other repeat-visit
+                           NPC here. */
+                        int ax = 17 * TILE + TILE / 2, ay = 7 * TILE + TILE / 2;
+                        int adx = px - ax, ady = py - ay;
+                        if(adx * adx + ady * ady <= 676) {
+                            if(!anne_gifted) {
+                                anne_gifted = 1;
+                                bag.gem += 5;
+                                seq_lines = TALK_ANNE_GIFT;
+                                seq_len = TALK_LEN(TALK_ANNE_GIFT);
+                            }
+                            else {
+                                seq_lines = TALK_ANNE_AGAIN;
+                                seq_len = TALK_LEN(TALK_ANNE_AGAIN);
+                            }
+                        }
+                    }
                     seq_beat = 0;
                 }
                 else if(map_id == MAP_FOREST) {
@@ -3232,7 +3331,7 @@ void main(void) {
             compute_camera(map_id, px, py, &cam_x, &cam_y);
             draw_map(map_id, cam_x, cam_y);
             draw_props(map_id, cam_x, cam_y);
-            draw_npcs(map_id, cam_x, cam_y, mason_spawned, cath_caught);
+            draw_npcs(map_id, cam_x, cam_y, mason_spawned, anne_spawned, cath_caught);
             draw_player(px - cam_x, py - cam_y, pdir, anim_counter / 10);
             draw_hud(got_shelf, looted_crate, bag.bandage);
             if(seq_lines)
