@@ -537,7 +537,8 @@ void main(void) {
         }
         else {
             int dx = 0, dy = 0;
-            int moved = 0;
+            int old_px = px, old_py = py, old_dir = pdir;
+            const char *old_dialogue = dialogue;
 
             if(pressed(raw, CONT_DPAD_LEFT))  { dx = -1; pdir = 2; }
             if(pressed(raw, CONT_DPAD_RIGHT)) { dx = 1;  pdir = 3; }
@@ -558,12 +559,10 @@ void main(void) {
                 if(dx != 0 && !tile_is_solid(tile_at((nx + (dx > 0 ? 6 : -6) - ROOM_OX) / ROOM_TILE,
                                                       (py - ROOM_OY) / ROOM_TILE))) {
                     px = nx;
-                    moved = 1;
                 }
                 if(dy != 0 && !tile_is_solid(tile_at((px - ROOM_OX) / ROOM_TILE,
                                                       (ny + (dy > 0 ? 6 : -6) - ROOM_OY) / ROOM_TILE))) {
                     py = ny;
-                    moved = 1;
                 }
 
                 if(px < ROOM_OX + 8) px = ROOM_OX + 8;
@@ -571,18 +570,26 @@ void main(void) {
                 if(py < ROOM_OY + 8) py = ROOM_OY + 8;
                 if(py > ROOM_OY + ROOM_ROWS * ROOM_TILE - 4) py = ROOM_OY + ROOM_ROWS * ROOM_TILE - 4;
             }
-            (void)moved;
 
             if(a_now && !prev_a) {
                 char mark = closest_mark(px, py);
                 dialogue = mark ? dialogue_for(mark) : 0;
             }
 
-            draw_house_background();
-            draw_props();
-            draw_player(px, py, pdir);
-            if(dialogue)
-                draw_dialogue_box(dialogue);
+            /* Redraw only when something actually changed: this is a
+               single, non-double-buffered framebuffer, so repainting
+               it every frame regardless (as the first version of this
+               loop did) races the video hardware's own scanout and
+               shows up as flicker/tearing -- it did not happen in
+               step 1 because that version only ever drew once, right
+               when the room was entered. */
+            if(px != old_px || py != old_py || pdir != old_dir || dialogue != old_dialogue) {
+                draw_house_background();
+                draw_props();
+                draw_player(px, py, pdir);
+                if(dialogue)
+                    draw_dialogue_box(dialogue);
+            }
         }
 
         prev_start = start_now;
