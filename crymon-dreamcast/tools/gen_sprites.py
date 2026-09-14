@@ -112,9 +112,14 @@ ITEM_ICONS = ['salve', 'bandage', 'bitterroot', 'dust', 'gem']
 ITEM_ICON_W, ITEM_ICON_H = 14, 14
 
 # Dialogue-box character portraits (public/sprites/portraits/<name>.png,
-# source art 160x200 to 225x225 depending on character), downscaled to
-# a small column that fits next to the wrapped text -- see
-# draw_dialogue_box()/PORTRAIT_W/PORTRAIT_H in main.c. Only the
+# source art 160x200 to 225x225 depending on character -- not all the
+# same aspect ratio), sized to fill as much of PORTRAIT_BOX_W x
+# PORTRAIT_BOX_H as possible without cropping or stretching: each
+# portrait is scaled by the SAME factor on both axes (min of the two
+# box/source ratios, "contain" scaling), so a 160x200 portrait and a
+# 225x225 one both end up as large as they can while keeping their
+# own real proportions -- see draw_dialogue_box() in main.c, which
+# centers whatever size comes out of this in that box. Only the
 # speakers TALK's beats actually use (SPK_* in main.c) are pulled;
 # the reference has portraits for every battle species too
 # (port-quillpup etc, shown on the battle-intro screen this port
@@ -123,13 +128,13 @@ PORTRAITS = [
     'max', 'anne', 'mason', 'wren', 'mae', 'ivo', 'nell', 'pike',
     'calder', 'bram', 'cathleen', 'shinigami',
 ]
-PORTRAIT_W, PORTRAIT_H = 32, 40
+PORTRAIT_BOX_W, PORTRAIT_BOX_H = 312, 176
 
 def rgb565(r, g, b):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
-def encode(im, dst_w, dst_h):
-    im = im.convert('RGBA').resize((dst_w, dst_h), Image.NEAREST)
+def encode(im, dst_w, dst_h, resample=Image.NEAREST):
+    im = im.convert('RGBA').resize((dst_w, dst_h), resample)
     px = im.load()
     out = []
     for y in range(dst_h):
@@ -228,13 +233,18 @@ def main():
         pixels = encode(im, ITEM_ICON_W, ITEM_ICON_H)
         emit_array(lines, 'icon_%s' % name, pixels, ITEM_ICON_W, ITEM_ICON_H)
 
-    lines.append('#define PORTRAIT_SPRITE_W %d' % PORTRAIT_W)
-    lines.append('#define PORTRAIT_SPRITE_H %d' % PORTRAIT_H)
+    lines.append('#define PORTRAIT_BOX_W %d' % PORTRAIT_BOX_W)
+    lines.append('#define PORTRAIT_BOX_H %d' % PORTRAIT_BOX_H)
     lines.append('')
     for name in PORTRAITS:
         im = Image.open(os.path.join(root, 'portraits', '%s.png' % name))
-        pixels = encode(im, PORTRAIT_W, PORTRAIT_H)
-        emit_array(lines, 'port_%s' % name, pixels, PORTRAIT_W, PORTRAIT_H)
+        sw, sh = im.size
+        scale = min(PORTRAIT_BOX_W / sw, PORTRAIT_BOX_H / sh)
+        dw, dh = max(1, round(sw * scale)), max(1, round(sh * scale))
+        pixels = encode(im, dw, dh, resample=Image.LANCZOS)
+        lines.append('#define PORT_%s_W %d' % (name.upper(), dw))
+        lines.append('#define PORT_%s_H %d' % (name.upper(), dh))
+        emit_array(lines, 'port_%s' % name, pixels, dw, dh)
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')

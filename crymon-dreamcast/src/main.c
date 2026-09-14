@@ -1163,12 +1163,31 @@ typedef struct {
 #define SPK_CATHLEEN  11
 #define SPK_SHINIGAMI 12
 
-#define PORTRAIT_W PORTRAIT_SPRITE_W
-#define PORTRAIT_H PORTRAIT_SPRITE_H
-static const u16 *const SPEAKER_PORTRAIT[13] = {
-    0, /* SPK_NONE */
-    port_max, port_anne, port_mason, port_wren, port_mae, port_ivo,
-    port_nell, port_pike, port_calder, port_bram, port_cathleen, port_shinigami,
+/* Each portrait keeps its source art's own aspect ratio (gen_sprites.py
+   scales every one by the same factor on both axes to fill as much of
+   PORTRAIT_BOX_W x PORTRAIT_BOX_H as possible -- "contain" scaling,
+   no cropping or stretching), so unlike every other sprite table in
+   this file they're not all the same size: this carries each one's
+   own w/h alongside its pixels for draw_dialogue_box to center. */
+typedef struct {
+    const u16 *px;
+    int w, h;
+} Portrait;
+
+static const Portrait SPEAKER_PORTRAIT[13] = {
+    { 0, 0, 0 }, /* SPK_NONE */
+    { port_max,       PORT_MAX_W,       PORT_MAX_H },
+    { port_anne,      PORT_ANNE_W,      PORT_ANNE_H },
+    { port_mason,     PORT_MASON_W,     PORT_MASON_H },
+    { port_wren,      PORT_WREN_W,      PORT_WREN_H },
+    { port_mae,       PORT_MAE_W,       PORT_MAE_H },
+    { port_ivo,       PORT_IVO_W,       PORT_IVO_H },
+    { port_nell,      PORT_NELL_W,      PORT_NELL_H },
+    { port_pike,      PORT_PIKE_W,      PORT_PIKE_H },
+    { port_calder,    PORT_CALDER_W,    PORT_CALDER_H },
+    { port_bram,      PORT_BRAM_W,      PORT_BRAM_H },
+    { port_cathleen,  PORT_CATHLEEN_W,  PORT_CATHLEEN_H },
+    { port_shinigami, PORT_SHINIGAMI_W, PORT_SHINIGAMI_H },
 };
 
 static const TalkBeat TALK_FATHER[] = {
@@ -1434,28 +1453,38 @@ static const char *const DEMO_END[] = {
 
 #define TALK_LEN(arr) (int)(sizeof(arr) / sizeof((arr)[0]))
 
-/* Box grew from a plain 40px text strip to 58px to fit a portrait
-   column (PORTRAIT_W=32 plus margins) alongside the text -- the
-   column is reserved even on a SPK_NONE beat (nothing drawn there)
-   so the text's wrap width stays constant regardless of speaker,
-   rather than reflowing every line depending on whether a portrait
-   is showing. Every existing TALK_* beat was re-checked against this
-   narrower 32-char wrap and stays within 3 lines. */
-#define DIALOGUE_BOX_Y     (SCREEN_H - 58)
-#define DIALOGUE_BOX_H     58
-#define DIALOGUE_MAX_CHARS 32
+/* The portrait now dominates the screen instead of sitting in a small
+   column: nothing else on screen matters while someone's talking
+   besides their portrait and what they're saying, so it gets the
+   whole width and everything between the top-left HUD (draw_hud,
+   0-22ish) and the text strip at the bottom. PORTRAIT_BOX_W/H (from
+   sprites.h, gen_sprites.py's own generation box) exactly fill that
+   remaining area -- 24 (below the HUD) + PORTRAIT_BOX_H (176) +
+   DIALOGUE_TEXT_H (40) == SCREEN_H (240) -- so there's no dead gap
+   and no overlap on either side. Each portrait already comes out of
+   sprites.h sized to fit inside that box without cropping or
+   stretching (gen_sprites.py's own contain-scaling, preserving each
+   character's real aspect ratio); this just centers whatever size
+   that is. */
+#define PORTRAIT_BOX_X     4
+#define PORTRAIT_BOX_Y     24
+#define DIALOGUE_TEXT_H    40
+#define DIALOGUE_TEXT_Y    (SCREEN_H - DIALOGUE_TEXT_H)
+#define DIALOGUE_MAX_CHARS ((SCREEN_W - 16) / 8)
 #define DIALOGUE_LINE_H    9
-#define DIALOGUE_TEXT_X    (4 + 4 + PORTRAIT_W + 6)
 
 /* No background panel -- outlined text (draw_glyph's own 1px black
    border) reads fine directly over the world/battle scene, so the
    dialogue box is really just a portrait plus wrapped text at a fixed
    screen position now, not an actual drawn box. */
 static void draw_dialogue_box(const TalkBeat *beat) {
-    if(beat->speaker != SPK_NONE)
-        blit_sprite(SPEAKER_PORTRAIT[beat->speaker], PORTRAIT_W, PORTRAIT_H,
-                    4 + 4, DIALOGUE_BOX_Y + (DIALOGUE_BOX_H - PORTRAIT_H) / 2);
-    draw_wrapped(beat->text, DIALOGUE_TEXT_X, DIALOGUE_BOX_Y + 8,
+    if(beat->speaker != SPK_NONE) {
+        const Portrait *p = &SPEAKER_PORTRAIT[beat->speaker];
+        blit_sprite(p->px, p->w, p->h,
+                    PORTRAIT_BOX_X + (PORTRAIT_BOX_W - p->w) / 2,
+                    PORTRAIT_BOX_Y + (PORTRAIT_BOX_H - p->h) / 2);
+    }
+    draw_wrapped(beat->text, 8, DIALOGUE_TEXT_Y + 8,
                  0xFFFF, DIALOGUE_SCALE,
                  DIALOGUE_MAX_CHARS, DIALOGUE_LINE_H);
 }
