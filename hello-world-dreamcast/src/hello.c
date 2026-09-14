@@ -99,88 +99,17 @@ static void video_init(void) {
     PVR(PVR_FB_CFG_1)  = PVR(PVR_FB_CFG_1) | 1u;
 }
 
-static void vram_clear(void) {
-    u32 i;
-    for(i = 0; i < (u32)SCREEN_W * SCREEN_H; i++)
-        VRAM16[i] = 0x0000;
-}
-
-static void put_pixel(int x, int y, u16 color) {
-    if(x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H)
-        return;
-    VRAM16[y * SCREEN_W + x] = color;
-}
-
-/* 8x8, 1bpp glyphs: bit 7 = leftmost pixel of each row. Index 0 is a
-   blank space; the rest are the letters needed to spell "HELLO WORLD". */
-enum { GLYPH_SPACE, GLYPH_H, GLYPH_E, GLYPH_L, GLYPH_O, GLYPH_W, GLYPH_R, GLYPH_D };
-
-static const uint8_t glyphs[8][8] = {
-    /* space */
-    { 0b00000000, 0b00000000, 0b00000000, 0b00000000,
-      0b00000000, 0b00000000, 0b00000000, 0b00000000 },
-    /* H */
-    { 0b10000001, 0b10000001, 0b10000001, 0b11111111,
-      0b10000001, 0b10000001, 0b10000001, 0b00000000 },
-    /* E */
-    { 0b11111111, 0b10000000, 0b10000000, 0b11111100,
-      0b10000000, 0b10000000, 0b11111111, 0b00000000 },
-    /* L */
-    { 0b10000000, 0b10000000, 0b10000000, 0b10000000,
-      0b10000000, 0b10000000, 0b11111111, 0b00000000 },
-    /* O */
-    { 0b01111110, 0b10000001, 0b10000001, 0b10000001,
-      0b10000001, 0b10000001, 0b01111110, 0b00000000 },
-    /* W */
-    { 0b10000001, 0b10000001, 0b10000001, 0b10100101,
-      0b10100101, 0b11011011, 0b10000001, 0b00000000 },
-    /* R */
-    { 0b11111110, 0b10000001, 0b10000001, 0b11111110,
-      0b10010000, 0b10001000, 0b10000100, 0b00000000 },
-    /* D */
-    { 0b11111100, 0b10000010, 0b10000001, 0b10000001,
-      0b10000001, 0b10000010, 0b11111100, 0b00000000 },
-};
-
-#define GLYPH_SCALE 3
-#define GLYPH_PX    (8 * GLYPH_SCALE)
-
-static void draw_glyph(int ox, int oy, int glyph) {
-    int row, col, sx, sy;
-
-    for(row = 0; row < 8; row++) {
-        uint8_t bits = glyphs[glyph][row];
-
-        for(col = 0; col < 8; col++) {
-            if(!(bits & (0x80 >> col)))
-                continue;
-
-            for(sy = 0; sy < GLYPH_SCALE; sy++)
-                for(sx = 0; sx < GLYPH_SCALE; sx++)
-                    put_pixel(ox + col * GLYPH_SCALE + sx,
-                              oy + row * GLYPH_SCALE + sy,
-                              0xFFFF);
-        }
-    }
-}
-
-static const int message[] = {
-    GLYPH_H, GLYPH_E, GLYPH_L, GLYPH_L, GLYPH_O, GLYPH_SPACE,
-    GLYPH_W, GLYPH_O, GLYPH_R, GLYPH_L, GLYPH_D
-};
-#define MESSAGE_LEN (int)(sizeof(message) / sizeof(message[0]))
+/* Raw 320x240 RGB565 image, letterboxed to preserve aspect ratio, baked
+   in by src/image_data.S (see tools/gen_image.py for the conversion). */
+extern const uint16_t image_rgb565[];
 
 void main(void) {
-    int i;
-    int total_w = MESSAGE_LEN * GLYPH_PX;
-    int ox = (SCREEN_W - total_w) / 2;
-    int oy = (SCREEN_H - GLYPH_PX) / 2;
+    u32 i;
 
     video_init();
-    vram_clear();
 
-    for(i = 0; i < MESSAGE_LEN; i++)
-        draw_glyph(ox + i * GLYPH_PX, oy, message[i]);
+    for(i = 0; i < (u32)SCREEN_W * SCREEN_H; i++)
+        VRAM16[i] = image_rgb565[i];
 
     for(;;)
         ;

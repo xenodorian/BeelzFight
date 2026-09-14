@@ -8,11 +8,14 @@ CFLAGS    = $(ARCHFLAGS) -O2 -fno-builtin -ffreestanding -fomit-frame-pointer \
             -Wall -Wextra -nostdlib -nostartfiles -nodefaultlibs
 LDFLAGS   = $(ARCHFLAGS) -nostdlib -nostartfiles -nodefaultlibs -T dc.ld -Wl,--build-id=none
 
-OBJS = src/start.o src/hello.o
+OBJS = src/start.o src/hello.o src/image_data.o
 
 all: hello.elf
 
 src/start.o: src/start.S
+	$(AS) $(ARCHFLAGS) -c -o $@ $<
+
+src/image_data.o: src/image_data.S src/assets/image_rgb565.bin
 	$(AS) $(ARCHFLAGS) -c -o $@ $<
 
 src/hello.o: src/hello.c

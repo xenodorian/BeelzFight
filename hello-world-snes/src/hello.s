@@ -1,9 +1,17 @@
 ; -----------------------------------------------------------------------
-; Hello World - minimal SNES (LoROM) program.
+; Hello World (image edition) - minimal SNES (LoROM) program.
 ;
-; Sets up BG1 in Mode 0 with a hand-drawn 8-glyph 2bpp font, writes a
-; static tilemap spelling "HELLO WORLD", turns the screen on, and halts.
-; No NMI/IRQ use is required since nothing needs to change after setup.
+; Sets up BG1 in Mode 3 (8bpp) with a full-screen 256x224 image
+; (256-color quantized, letterboxed to preserve aspect ratio), turns the
+; screen on, and halts. No NMI/IRQ use is required since nothing needs
+; to change after setup.
+;
+; The image data (896 unique 8x8 tiles + tilemap + 256-color palette) is
+; too big for one 32KB LoROM bank, so it's split across two extra ROM
+; banks (TILES1/TILES2) and copied to VRAM by temporarily switching the
+; data bank register (DBR) to point at each one in turn. PPU registers
+; at $21xx/$42xx are mirrored into every bank in $00-$3F, so "sta VMDATAL"
+; etc. keep working correctly regardless of what DBR is set to.
 ; -----------------------------------------------------------------------
 
 .p816
@@ -66,74 +74,111 @@ reset_handler:
     lda #$8F
     sta INIDISP         ; forced blank while we set everything up
 
-    ; -------------------------------------------------------------
-    ; Font tiles: 8 glyphs, 2bpp, 16 bytes each -> VRAM word $0000
-    ; -------------------------------------------------------------
     lda #$80
     sta VMAIN           ; VRAM address increments after the high byte write
 
+    ; -------------------------------------------------------------
+    ; Tiles, part 1: bank $01, 32768 bytes -> VRAM word $0000
+    ; -------------------------------------------------------------
     seta16
     lda #$0000
     sta VMADDL
     seta8
 
+    lda #$01
+    pha
+    plb                 ; DBR = bank 1 (TILES1 segment)
+
     setxy16
     ldx #$0000
-copy_font:
-    lda font_tiles,x
+copy_tiles1:
+    lda tiles_bank1,x
     sta VMDATAL
-    lda font_tiles+1,x
+    lda tiles_bank1+1,x
     sta VMDATAH
     inx
     inx
-    cpx #(NUM_GLYPHS*16)
-    bne copy_font
+    cpx #$8000          ; 32768 bytes
+    bne copy_tiles1
 
     ; -------------------------------------------------------------
-    ; Tilemap: 32x32 entries (2 bytes each) -> VRAM word $0400
+    ; Tiles, part 2: bank $02, 24576 bytes -> VRAM word $4000
     ; -------------------------------------------------------------
+    setxy8
     seta16
-    lda #$0400
+    lda #$4000
     sta VMADDL
     seta8
 
+    lda #$02
+    pha
+    plb                 ; DBR = bank 2 (TILES2 segment)
+
+    setxy16
     ldx #$0000
-copy_map:
-    lda tilemap,x
+copy_tiles2:
+    lda tiles_bank2,x
     sta VMDATAL
-    lda tilemap+1,x
+    lda tiles_bank2+1,x
     sta VMDATAH
     inx
     inx
-    cpx #TILEMAP_BYTES
+    cpx #$6000          ; 24576 bytes
+    bne copy_tiles2
+
+    ; -------------------------------------------------------------
+    ; Tilemap: 32x32 entries (2 bytes each) -> VRAM word $7000
+    ; -------------------------------------------------------------
+    setxy8
+    seta16
+    lda #$7000
+    sta VMADDL
+    seta8
+
+    setxy16
+    ldx #$0000
+copy_map:
+    lda tilemap_data,x
+    sta VMDATAL
+    lda tilemap_data+1,x
+    sta VMDATAH
+    inx
+    inx
+    cpx #$0800          ; 2048 bytes
     bne copy_map
     setxy8
 
     ; -------------------------------------------------------------
-    ; Palette: color 0 = black (backdrop), color 1 = white (glyph ink)
+    ; Palette: 256 BGR555 entries (still DBR = bank 2)
     ; -------------------------------------------------------------
     lda #$00
     sta CGADD
-    lda #$00
-    sta CGDATA          ; color 0 low byte
-    lda #$00
-    sta CGDATA          ; color 0 high byte -> $0000 (black)
+    setxy16
+    ldx #$0000
+copy_pal:
+    lda palette_data,x
+    sta CGDATA
+    lda palette_data+1,x
+    sta CGDATA
+    inx
+    inx
+    cpx #$0200          ; 512 bytes = 256 entries
+    bne copy_pal
+    setxy8
 
-    lda #$01
-    sta CGADD
-    lda #$FF
-    sta CGDATA          ; color 1 low byte
-    lda #$7F
-    sta CGDATA          ; color 1 high byte -> $7FFF (white)
+    lda #$00
+    pha
+    plb                 ; DBR back to bank 0
 
     ; -------------------------------------------------------------
-    ; Background setup: Mode 0, BG1 tilemap at $0400, tiles at $0000
+    ; Background setup: Mode 3, BG1 8bpp, tiles at word $0000,
+    ; tilemap at word $7000 (32x32 map)
     ; -------------------------------------------------------------
-    lda #$00
-    sta BGMODE          ; mode 0, all backgrounds 2bpp
+    lda #$03
+    sta BGMODE          ; mode 3: BG1 = 8bpp
 
-    lda #$04
-    sta BG1SC           ; map base word $0400, 32x32 single screen
+    lda #$70
+    sta BG1SC           ; map base word $7000, 32x32 single screen
 
     lda #$00
     sta BG12NBA         ; BG1 tile data base word $0000
@@ -153,83 +198,23 @@ nmi_handler:
 irq_handler:
     rti
 
-; -----------------------------------------------------------------------
-; Font data: 8x8, 2bpp, plane 1 unused (zero) -> pixels are color 0/1 only.
-; Each row is (plane0 byte, plane1 byte); plane1 is all zero.
-; -----------------------------------------------------------------------
-NUM_GLYPHS = 8
+.segment "TILES1"
+tiles_bank1:
+    .incbin "assets/tiles_bank1.bin"
 
-.macro glyph b0,b1,b2,b3,b4,b5,b6,b7
-    .byte b0,$00, b1,$00, b2,$00, b3,$00
-    .byte b4,$00, b5,$00, b6,$00, b7,$00
-.endmacro
-
-font_tiles:
-    ; tile 0: space
-    glyph %00000000,%00000000,%00000000,%00000000,%00000000,%00000000,%00000000,%00000000
-    ; tile 1: H
-    glyph %10000001,%10000001,%10000001,%11111111,%10000001,%10000001,%10000001,%00000000
-    ; tile 2: E
-    glyph %11111111,%10000000,%10000000,%11111100,%10000000,%10000000,%11111111,%00000000
-    ; tile 3: L
-    glyph %10000000,%10000000,%10000000,%10000000,%10000000,%10000000,%11111111,%00000000
-    ; tile 4: O
-    glyph %01111110,%10000001,%10000001,%10000001,%10000001,%10000001,%01111110,%00000000
-    ; tile 5: W
-    glyph %10000001,%10000001,%10000001,%10100101,%10100101,%11011011,%10000001,%00000000
-    ; tile 6: R
-    glyph %11111110,%10000001,%10000001,%11111110,%10010000,%10001000,%10000100,%00000000
-    ; tile 7: D
-    glyph %11111100,%10000010,%10000001,%10000001,%10000001,%10000010,%11111100,%00000000
-
-; -----------------------------------------------------------------------
-; Tilemap: 32x32 entries, 2 bytes each (low byte = tile index, high byte
-; = palette/flip/priority, 0 here). "HELLO WORLD" is placed on row 14,
-; starting at column 10; every other entry is tile 0 (blank).
-; -----------------------------------------------------------------------
-TILEMAP_BYTES = 32*32*2
-
-MSG_ROW = 14
-MSG_COL = 10
-
-.macro tile n
-    .byte n, $00
-.endmacro
-
-tilemap:
-    .repeat MSG_ROW
-        .repeat 32
-            tile 0
-        .endrepeat
-    .endrepeat
-    .repeat MSG_COL
-        tile 0
-    .endrepeat
-    tile 1  ; H
-    tile 2  ; E
-    tile 3  ; L
-    tile 3  ; L
-    tile 4  ; O
-    tile 0  ; space
-    tile 5  ; W
-    tile 4  ; O
-    tile 6  ; R
-    tile 3  ; L
-    tile 7  ; D
-    .repeat 32 - MSG_COL - 11
-        tile 0
-    .endrepeat
-    .repeat 32 - MSG_ROW - 1
-        .repeat 32
-            tile 0
-        .endrepeat
-    .endrepeat
+.segment "TILES2"
+tiles_bank2:
+    .incbin "assets/tiles_bank2.bin"
+tilemap_data:
+    .incbin "assets/tilemap.bin"
+palette_data:
+    .incbin "assets/palette.bin"
 
 .segment "HEADER"
     .byte "HELLO WORLD SNES     "  ; 21 bytes, space padded
     .byte $20                     ; map mode: LoROM, slow
     .byte $00                     ; cartridge type: ROM only
-    .byte $05                     ; ROM size: 32 KB
+    .byte $07                     ; ROM size: 128 KB
     .byte $00                     ; RAM size: none
     .byte $01                     ; destination code: USA
     .byte $00                     ; fixed / license code
