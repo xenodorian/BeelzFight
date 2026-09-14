@@ -55,15 +55,36 @@ typedef unsigned int   u32;
 #define SCREEN_W 320
 #define SCREEN_H 240
 
-/* Single framebuffer, written directly, with vblank pacing only
-   (no double buffering). The earlier double-buffer scheme not only
-   added complexity but was easy to get wrong (a first version left
-   the PVR_FB_ADDR swap landing off the vblank boundary, causing the
-   exact tearing it was meant to fix). A single buffer plus a
-   wait-then-draw loop is simpler and matches how the smallest
-   working reference code (e.g. KallistiOS's own raw-framebuffer
-   examples) does it. */
-static volatile u16 *const draw_fb = (volatile u16 *)0xa5000000u;
+/* Double buffering, pipelined: each iteration flips to show whatever
+   was drawn into the back buffer *last* iteration, then draws the
+   next frame into the buffer that just became hidden. This is the
+   order a KallistiOS/Dreamcast homebrew community reference (a
+   DCEmulation forum thread on KOS double buffering) describes as
+   correct: wait_vblank() -> flip the already-drawn buffer into view
+   -> only then draw the next frame. The single-buffer version tried
+   before this made tearing worse, not better, since every redraw
+   wrote directly into whatever the display was actively scanning;
+   double buffering keeps drawing entirely off-screen, so only a
+   correctly-timed flip is needed to avoid tearing.
+
+   This requires drawing every frame unconditionally, not just when
+   something changed: alternating buffers while only sometimes
+   redrawing would show one buffer's fresh content and then the
+   *other* buffer's stale content every other frame once movement
+   stops, which is its own visible glitch. Redrawing every frame is
+   safe here specifically because it only ever touches the hidden
+   buffer -- it was only unsafe in the single-buffer version. */
+#define FB_OFFSET0 0x000000u
+#define FB_OFFSET1 0x040000u
+
+static u32 fb_back_offset = FB_OFFSET1;
+static volatile u16 *draw_fb = (volatile u16 *)(0xa5000000u + FB_OFFSET1);
+
+static void fb_flip(void) {
+    PVR(PVR_FB_ADDR) = fb_back_offset;
+    fb_back_offset = (fb_back_offset == FB_OFFSET0) ? FB_OFFSET1 : FB_OFFSET0;
+    draw_fb = (volatile u16 *)(0xa5000000u + fb_back_offset);
+}
 
 /* DM_320x240_NTSC timing parameters, from KallistiOS's vid_builtin table */
 #define SCANLINES 262
@@ -528,30 +549,32 @@ void main(void) {
 
     video_init();
     maple_init();
-    draw_press_start();
 
     find_mark('P', &col, &row);
     px = ROOM_OX + col * ROOM_TILE + ROOM_TILE / 2;
     py = ROOM_OY + row * ROOM_TILE + ROOM_TILE / 2;
 
+    /* Prime both buffers with the title screen before the main loop
+       starts flipping, so the first flip doesn't show whatever
+       garbage was in VRAM at boot. */
+    draw_press_start();
+    fb_flip();
+    draw_press_start();
+
     for(;;) {
+        wait_vblank();
+        fb_flip();
+
         raw = maple_poll_buttons();
         start_now = pressed(raw, CONT_START);
         a_now     = pressed(raw, CONT_A);
 
         if(state == 0) {
-            if(start_now && !prev_start) {
+            if(start_now && !prev_start)
                 state = 1;
-                wait_vblank();
-                draw_house_background();
-                draw_props();
-                draw_player(px, py, pdir);
-            }
         }
         else {
             int dx = 0, dy = 0;
-            int old_px = px, old_py = py, old_dir = pdir;
-            const char *old_dialogue = dialogue;
 
             if(pressed(raw, CONT_DPAD_LEFT))  { dx = -1; pdir = 2; }
             if(pressed(raw, CONT_DPAD_RIGHT)) { dx = 1;  pdir = 3; }
@@ -588,25 +611,21 @@ void main(void) {
                 char mark = closest_mark(px, py);
                 dialogue = mark ? dialogue_for(mark) : 0;
             }
+        }
 
-            /* Redraw only when something actually changed -- no point
-               repainting a frame identical to the one already on
-               screen. wait_vblank() right before drawing starts the
-               redraw as close to the start of the blanking interval
-               as possible, the same single-buffer approach KOS's own
-               raw-framebuffer examples use (e.g. mrbtris: write
-               directly to vram_s, pace with vid_waitvbl(), no manual
-               double buffering). Some tearing on a full-room redraw
-               is an accepted tradeoff of skipping double buffering
-               entirely, not a bug to chase. */
-            if(px != old_px || py != old_py || pdir != old_dir || dialogue != old_dialogue) {
-                wait_vblank();
-                draw_house_background();
-                draw_props();
-                draw_player(px, py, pdir);
-                if(dialogue)
-                    draw_dialogue_box(dialogue);
-            }
+        /* Draw every frame, unconditionally, into the buffer that was
+           just hidden by the flip above. See the fb_flip comment for
+           why this has to be unconditional now, unlike the earlier
+           dirty-check versions. */
+        if(state == 0) {
+            draw_press_start();
+        }
+        else {
+            draw_house_background();
+            draw_props();
+            draw_player(px, py, pdir);
+            if(dialogue)
+                draw_dialogue_box(dialogue);
         }
 
         prev_start = start_now;
