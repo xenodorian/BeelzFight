@@ -382,8 +382,31 @@ static const uint8_t glyph_exclaim[8] = {
     0b00011000, 0, 0b00011000, 0,
 };
 
+/* Every text call draws with a 1px black outline now instead of
+   sitting on an opaque box (see the now-boxless draw_dialogue_box/
+   draw_menu_frame/draw_box/draw_hud_toast below) -- 8 black copies of
+   the glyph offset by 1px in each direction, then the real color on
+   top, so the outline has no diagonal gaps at glyph corners. Costs
+   9x the fill work per glyph, but glyphs are tiny (8x8) and this
+   only runs for on-screen text, well within budget. */
 static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int scale) {
-    int row, col, sx, sy;
+    static const int OUTLINE_DX[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
+    static const int OUTLINE_DY[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
+    int row, col, sx, sy, k;
+
+    for(k = 0; k < 8; k++) {
+        for(row = 0; row < 8; row++) {
+            uint8_t bits = bitmap[row];
+            for(col = 0; col < 8; col++) {
+                if(!(bits & (0x80 >> col)))
+                    continue;
+                for(sy = 0; sy < scale; sy++)
+                    for(sx = 0; sx < scale; sx++)
+                        put_pixel(ox + col * scale + sx + OUTLINE_DX[k],
+                                  oy + row * scale + sy + OUTLINE_DY[k], 0x0000);
+            }
+        }
+    }
 
     for(row = 0; row < 8; row++) {
         uint8_t bits = bitmap[row];
@@ -1223,12 +1246,9 @@ static const TalkBeat TALK_MASON_FIGHT[] = {
     { "HE'S MINE.", SPK_MAX },
     { "I ALREADY CAUGHT A CRYMON. FIGHT ME.", SPK_MASON },
 };
-static const TalkBeat TALK_MASON_AFTER[] = {
-    { "FINE. CALDER IS STILL SOUTH.", SPK_MASON },
-    { "I WON'T DIE FIRST.", SPK_MAX },
-};
 static const TalkBeat TALK_MASON_WIN[] = {
     { "MASON SPITS IN THE DIRT. THE PATH IS YOURS. CALDER STILL WAITS SOUTH.", SPK_NONE },
+    { "I WON'T DIE FIRST.", SPK_MASON },
 };
 /* Mason's rematch, ambush dialogue -- see main()'s mason2_* state and
    the world-actors section comment for the full trigger chain. */
@@ -1427,15 +1447,16 @@ static const char *const DEMO_END[] = {
 #define DIALOGUE_LINE_H    9
 #define DIALOGUE_TEXT_X    (4 + 4 + PORTRAIT_W + 6)
 
+/* No background panel -- outlined text (draw_glyph's own 1px black
+   border) reads fine directly over the world/battle scene, so the
+   dialogue box is really just a portrait plus wrapped text at a fixed
+   screen position now, not an actual drawn box. */
 static void draw_dialogue_box(const TalkBeat *beat) {
-    fill_rect(4, DIALOGUE_BOX_Y, SCREEN_W - 8, DIALOGUE_BOX_H, rgb565(18, 17, 14));
-    fill_rect(4, DIALOGUE_BOX_Y, SCREEN_W - 8, 2, rgb565(197, 206, 198));
-    fill_rect(4, DIALOGUE_BOX_Y + DIALOGUE_BOX_H - 2, SCREEN_W - 8, 2, rgb565(197, 206, 198));
     if(beat->speaker != SPK_NONE)
         blit_sprite(SPEAKER_PORTRAIT[beat->speaker], PORTRAIT_W, PORTRAIT_H,
                     4 + 4, DIALOGUE_BOX_Y + (DIALOGUE_BOX_H - PORTRAIT_H) / 2);
     draw_wrapped(beat->text, DIALOGUE_TEXT_X, DIALOGUE_BOX_Y + 8,
-                 rgb565(232, 228, 216), DIALOGUE_SCALE,
+                 0xFFFF, DIALOGUE_SCALE,
                  DIALOGUE_MAX_CHARS, DIALOGUE_LINE_H);
 }
 
@@ -1443,13 +1464,10 @@ static void draw_dialogue_box(const TalkBeat *beat) {
    the top of the screen, distinct from the dialogue box at the bottom
    so the two are never confused even though they never actually show
    at once (say() always clears hudT, and every note() call site is
-   reached from plain world state, not mid-dialogue). */
+   reached from plain world state, not mid-dialogue). No background
+   panel, same as the dialogue box above -- just outlined text. */
 static void draw_hud_toast(const char *text) {
-    int w = SCREEN_W - 40;
-    fill_rect(20, 6, w, 16, rgb565(18, 17, 14));
-    fill_rect(20, 6, w, 1, rgb565(197, 206, 198));
-    fill_rect(20, 21, w, 1, rgb565(197, 206, 198));
-    draw_text_s(text, 26, 10, rgb565(232, 228, 216), DIALOGUE_SCALE);
+    draw_text_s(text, 26, 10, 0xFFFF, DIALOGUE_SCALE);
 }
 
 /* Small HUD in the screen's top-left corner (fixed there regardless
@@ -1669,13 +1687,13 @@ typedef struct {
 #define MENU_SCALE 1
 #define MENU_ROW_H 16
 
+/* No background panel -- outlined text reads fine directly over
+   whatever's behind the menu (the world scene, since draw_bag_menu/
+   draw_party_menu/draw_shop are all drawn as an overlay after it). */
 static void draw_menu_frame(const char *title) {
-    fill_rect(MENU_X, MENU_Y, MENU_W, MENU_H, rgb565(18, 17, 14));
-    fill_rect(MENU_X, MENU_Y, MENU_W, 2, rgb565(197, 206, 198));
-    fill_rect(MENU_X, MENU_Y + MENU_H - 2, MENU_W, 2, rgb565(197, 206, 198));
-    draw_text_s(title, MENU_X + 8, MENU_Y + 8, rgb565(197, 206, 198), MENU_SCALE);
+    draw_text_s(title, MENU_X + 8, MENU_Y + 8, 0xFFFF, MENU_SCALE);
     draw_text_s("B CLOSE", MENU_X + 8, MENU_Y + MENU_H - 16,
-                rgb565(90, 122, 82), MENU_SCALE);
+                rgb565(180, 220, 170), MENU_SCALE);
 }
 
 /* ITEM_COUNT-indexed icon lookup (ITEM_SALVE..ITEM_GEM, defined
@@ -2399,17 +2417,10 @@ static int try_encounter(int map_id, int px, int py, int party_n,
  * them), this uses drawBattle()'s own layout: small boxed status
  * readouts and a content box, both far short of the full screen, so
  * the battle-bg.png background and both sprites stay visible in
- * between them. Boxes use draw_box (all 4 sides bordered, matching
- * draw.lua's draw.box) rather than draw_menu_frame's top/bottom-only
- * style used elsewhere.
+ * between them. No background panels (see draw_dialogue_box's own
+ * comment) -- status text and the message/menu area both sit
+ * directly over the battle background/sprites now, just outlined.
  * ---------------------------------------------------------------------- */
-static void draw_box(int x, int y, int w, int h) {
-    fill_rect(x, y, w, h, rgb565(18, 17, 14));
-    fill_rect(x, y, w, 2, rgb565(197, 206, 198));
-    fill_rect(x, y + h - 2, w, 2, rgb565(197, 206, 198));
-    fill_rect(x, y, 2, h, rgb565(197, 206, 198));
-    fill_rect(x + w - 2, y, 2, h, rgb565(197, 206, 198));
-}
 
 /* Layout: foe status + foe sprite occupy the top row (status box
    top-left, sprite top-right, classic JRPG split); the message/menu
@@ -2485,7 +2496,6 @@ static void draw_battle_status(const Battle *b) {
     char buf[40];
     int n;
 
-    draw_box(BFOE_BOX_X, BFOE_BOX_Y, BFOE_BOX_W, BFOE_BOX_H);
     n = s_cat(buf, 0, b->foe.shiny ? "*" : "");
     n = s_cat(buf, n, SPECIES[b->foe.species].name);
     n = s_cat(buf, n, " LV");
@@ -2499,7 +2509,6 @@ static void draw_battle_status(const Battle *b) {
     buf[n] = 0;
     draw_text_s(buf, BFOE_BOX_X + 6, BFOE_BOX_Y + 4 + MENU_ROW_H, rgb565(197, 206, 198), MENU_SCALE);
 
-    draw_box(BPL_BOX_X, BPL_BOX_Y, BPL_BOX_W, BPL_BOX_H);
     n = s_cat(buf, 0, b->pl.shiny ? "*" : "");
     n = s_cat(buf, n, SPECIES[b->pl.species].name);
     n = s_cat(buf, n, " LV");
@@ -2693,7 +2702,6 @@ static void draw_battle(const Battle *b, const Bag *bag, u32 frame_count) {
     draw_battle_bg();
     draw_battle_status(b);
     draw_battle_sprites(b, frame_count);
-    draw_box(BCONTENT_X, BCONTENT_Y, BCONTENT_W, BCONTENT_H);
 
     switch(b->phase) {
         case 0:
@@ -3351,6 +3359,10 @@ void main(void) {
                                     seq_beat = 0;
                                 }
                                 else if(battle.trainer_kind == TRAINER_MASON) {
+                                    /* He leaves the instant this
+                                       closes, same as the rematch --
+                                       no more standing-and-wait step
+                                       requiring a second walk-up. */
                                     beat_mason = 1;
                                     marks += 10;
                                     battles++;
@@ -3359,6 +3371,7 @@ void main(void) {
                                     seq_lines = TALK_MASON_WIN;
                                     seq_len = TALK_LEN(TALK_MASON_WIN);
                                     seq_beat = 0;
+                                    post_action = POST_MASON_LEAVE;
                                 }
                                 else if(battle.trainer_kind == TRAINER_MASON2) {
                                     /* No standing/re-interact step this
@@ -4353,29 +4366,13 @@ void main(void) {
                             post_action = POST_CALDER;
                         }
                     }
-                    else if(mason_state == 2) {
-                        /* Mason: state 2 means he's already force-
-                           walked up and ambushed the player once (see
-                           the actor-movement update above) and is now
-                           standing put until re-approached. Interact
-                           shows masonAfter, which queues his walk-away
-                           (POST_MASON_LEAVE, mason_state 3). This has
-                           to be an else-if chained onto the same a_now
-                           check as every other VELD mark, not a
-                           separate `if` using the same button-press
-                           edge -- a separate `if` re-fired on the very
-                           same press that had just closed a dialogue
-                           (seq_lines had already gone back to 0 a few
-                           lines above, in this same frame), reopening
-                           Mason's dialogue immediately and forever the
-                           moment the player stood near him. */
-                        int ddx = px - (int)mason_x, ddy = py - (int)mason_y;
-                        if(ddx * ddx + ddy * ddy <= 676 && beat_mason) {
-                            seq_lines = TALK_MASON_AFTER;
-                            seq_len = TALK_LEN(TALK_MASON_AFTER);
-                            post_action = POST_MASON_LEAVE;
-                        }
-                    }
+                    /* Mason has no standing/repeat-visit interact of
+                       his own either (mason_state == 2 is just the
+                       moment he's ambushing/fighting, not a wait-for-
+                       a-second-visit step): he leaves automatically
+                       the instant the win dialogue closes (see
+                       POST_MASON_LEAVE at the TRAINER_MASON win
+                       handler), same as Anne below. */
                     /* Anne has no standing/repeat-visit interact of her
                        own: she force-walks up, gifts, and leaves in
                        one uninterrupted sequence (see the actor-
