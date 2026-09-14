@@ -28,15 +28,14 @@
  *     party-menu section comment.)
  *   - Sprites: the player and the 3 walking world actors (Mason, Anne,
  *     FOREST soldiers) get a real 4-frame walk cycle per direction;
- *     every other world NPC and every fightable species' battle art is
- *     a single standing/idle frame (the source has more frames for
- *     some of these, e.g. species folders' frames 2-4, but they're
- *     never sampled here -- no idle-breathing/blink animation on
- *     anything that doesn't actually walk). Map tiles still draw as
- *     flat color blocks (paintTile's own palette, ported in full --
- *     see draw_tile); the reference itself does this too for terrain
- *     (draw.lua's paintTile is flat rectangles in the LÖVE build as
- *     well, not a tileset image).
+ *     every stationary world NPC and every fightable species' battle
+ *     art idle-animates too now (4 frames at 4fps, 3fps for Shinigami,
+ *     matching drawWorld()/drawBattle()'s own clock-driven frame
+ *     index -- see draw_npc_idle()/draw_battle_sprites()). Map tiles
+ *     still draw as flat color blocks (paintTile's own palette, ported
+ *     in full -- see draw_tile); the reference itself does this too
+ *     for terrain (draw.lua's paintTile is flat rectangles in the
+ *     LÖVE build as well, not a tileset image).
  *   - Dialogue/UI text is upper-cased and stripped of most punctuation
  *     (apostrophes, periods, commas, quotes) to fit this port's own
  *     hand-authored 8x8 bitmap font, which only has A-Z/0-9/space/+/-
@@ -870,6 +869,19 @@ static void draw_npc(int map_id, char mark, const u16 *px, int w, int h, int cam
     blit_sprite(px, w, h, cx - cam_x - w / 2, cy - cam_y - h);
 }
 
+/* Idle-animated variant of the above, for the 8 stationary NPCs that
+   still cycle 4 standing frames in the reference (drawWorld()'s
+   `Math.floor(this.clock * 4) % 4 + 1`, `* 3` for Shinigami --
+   frames_per_step converts that fps into "how many 60Hz vblank
+   frames this idle frame holds", 15 for 4fps, 20 for 3fps). */
+static void draw_npc_idle(int map_id, char mark, const u16 *const frames[4], u32 frame_count,
+                           int frames_per_step, int w, int h, int cam_x, int cam_y) {
+    int cx, cy;
+    int f = (int)((frame_count / (u32)frames_per_step) % 4u);
+    mark_center(map_id, mark, &cx, &cy);
+    blit_sprite(frames[f], w, h, cx - cam_x - w / 2, cy - cam_y - h);
+}
+
 /* dir/frame lookup tables for the 3 walking actors (Mason, Anne, the
    FOREST soldiers all share one sprite set), matching
    gen_sprites.py's PLAYER_DIRS order: 0=down,1=up,2=left,3=right. */
@@ -899,18 +911,27 @@ static void draw_walker(const u16 *const frames[4][4], float x, float y, int dir
                 cx - cam_x - NPC_SPRITE_W / 2, cy - cam_y - NPC_SPRITE_H);
 }
 
-static void draw_npcs(int map_id, int cam_x, int cam_y,
+static const u16 *const WREN_FRAMES[4]   = { npc_wren_1, npc_wren_2, npc_wren_3, npc_wren_4 };
+static const u16 *const MAE_FRAMES[4]    = { npc_mae_1, npc_mae_2, npc_mae_3, npc_mae_4 };
+static const u16 *const IVO_FRAMES[4]    = { npc_ivo_1, npc_ivo_2, npc_ivo_3, npc_ivo_4 };
+static const u16 *const NELL_FRAMES[4]   = { npc_nell_1, npc_nell_2, npc_nell_3, npc_nell_4 };
+static const u16 *const PIKE_FRAMES[4]   = { npc_pike_1, npc_pike_2, npc_pike_3, npc_pike_4 };
+static const u16 *const BRAM_FRAMES[4]   = { npc_bram_1, npc_bram_2, npc_bram_3, npc_bram_4 };
+static const u16 *const CALDER_FRAMES[4] = { npc_calder_1, npc_calder_2, npc_calder_3, npc_calder_4 };
+static const u16 *const SHINIGAMI_FRAMES[4] = { npc_shinigami_1, npc_shinigami_2, npc_shinigami_3, npc_shinigami_4 };
+
+static void draw_npcs(int map_id, int cam_x, int cam_y, u32 frame_count,
                        int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
                        int anne_state, float anne_x, float anne_y, int anne_dir, int anne_frame,
                        int cath_caught, const Soldier *soldiers, const int *soldier_beaten) {
     if(map_id == MAP_VELD) {
-        draw_npc(map_id, 'K', npc_wren, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, 'I', npc_mae, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, 'V', npc_ivo, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, 'A', npc_nell, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, 'Q', npc_pike, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, 'J', npc_bram, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc(map_id, 'E', npc_calder, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, 'K', WREN_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, 'I', MAE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, 'V', IVO_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, 'A', NELL_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, 'Q', PIKE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, 'J', BRAM_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, 'E', CALDER_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
         if(mason_state)
             draw_walker(MASON_FRAMES, mason_x, mason_y, mason_dir, mason_frame, cam_x, cam_y);
         if(anne_state)
@@ -925,7 +946,7 @@ static void draw_npcs(int map_id, int cam_x, int cam_y,
         }
     }
     else if(map_id == MAP_GROVE) {
-        draw_npc(map_id, '9', npc_shinigami, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc_idle(map_id, '9', SHINIGAMI_FRAMES, frame_count, 20, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
         if(!cath_caught)
             draw_npc(map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H, cam_x, cam_y);
     }
@@ -2098,16 +2119,28 @@ static void draw_box(int x, int y, int w, int h) {
    "Max's CryMon" (the player's own active monster; Max herself
    already has her own walk sprite on the world map, so this is what
    "the player's battle sprite" actually means in this game). */
-static const u16 *const MONSTER_SPRITES[11] = {
-    monster_quillpup, monster_glimmoth, monster_tortcask, monster_razorbat,
-    monster_mossback, monster_briarfox, monster_fenwisp, monster_duskhorn,
-    monster_needleroot, monster_cathleen, monster_crymare,
+static const u16 *const MONSTER_SPRITES[11][4] = {
+    { monster_quillpup_1, monster_quillpup_2, monster_quillpup_3, monster_quillpup_4 },
+    { monster_glimmoth_1, monster_glimmoth_2, monster_glimmoth_3, monster_glimmoth_4 },
+    { monster_tortcask_1, monster_tortcask_2, monster_tortcask_3, monster_tortcask_4 },
+    { monster_razorbat_1, monster_razorbat_2, monster_razorbat_3, monster_razorbat_4 },
+    { monster_mossback_1, monster_mossback_2, monster_mossback_3, monster_mossback_4 },
+    { monster_briarfox_1, monster_briarfox_2, monster_briarfox_3, monster_briarfox_4 },
+    { monster_fenwisp_1, monster_fenwisp_2, monster_fenwisp_3, monster_fenwisp_4 },
+    { monster_duskhorn_1, monster_duskhorn_2, monster_duskhorn_3, monster_duskhorn_4 },
+    { monster_needleroot_1, monster_needleroot_2, monster_needleroot_3, monster_needleroot_4 },
+    { monster_cathleen_1, monster_cathleen_2, monster_cathleen_3, monster_cathleen_4 },
+    { monster_crymare_1, monster_crymare_2, monster_crymare_3, monster_crymare_4 },
 };
 
-static void draw_battle_sprites(const Battle *b) {
-    blit_sprite(MONSTER_SPRITES[b->foe.species], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+/* Idle-animated like the stationary world NPCs (drawBattle()'s own
+   `Math.floor(b.t * 4) % 4 + 1`, shared by foe and player sprite) --
+   frame_count/15 matches the same 4fps cadence draw_npc_idle() uses. */
+static void draw_battle_sprites(const Battle *b, u32 frame_count) {
+    int f = (int)((frame_count / 15u) % 4u);
+    blit_sprite(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
                 BSPRITE_X, BFOE_SPRITE_Y);
-    blit_sprite(MONSTER_SPRITES[b->pl.species], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+    blit_sprite(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
                 BSPRITE_X, BPL_SPRITE_Y);
 }
 
@@ -2307,10 +2340,10 @@ static void draw_battle_bg(void) {
     blit_sprite(battle_bg, BATTLE_BG_W, BATTLE_BG_H, 0, 0);
 }
 
-static void draw_battle(const Battle *b, const Bag *bag) {
+static void draw_battle(const Battle *b, const Bag *bag, u32 frame_count) {
     draw_battle_bg();
     draw_battle_status(b);
-    draw_battle_sprites(b);
+    draw_battle_sprites(b, frame_count);
     draw_box(BCONTENT_X, BCONTENT_Y, BCONTENT_W, BCONTENT_H);
 
     switch(b->phase) {
@@ -3870,7 +3903,7 @@ void main(void) {
             {
                 int mason_frame = (mason_state == 1 || mason_state == 3) ? (int)mason_anim % 4 : 0;
                 int anne_frame = (anne_state == 1 || anne_state == 3) ? (int)anne_anim % 4 : 0;
-                draw_npcs(map_id, cam_x, cam_y,
+                draw_npcs(map_id, cam_x, cam_y, frame_count,
                           mason_state, mason_x, mason_y, mason_dir, mason_frame,
                           anne_state, anne_x, anne_y, anne_dir, anne_frame,
                           cath_caught, soldiers, soldier_beaten);
@@ -3886,7 +3919,7 @@ void main(void) {
             else if(menu_mode == 2)
                 draw_party_menu(party, party_n, lead, party_cur);
             if(in_battle)
-                draw_battle(&battle, &bag);
+                draw_battle(&battle, &bag, frame_count);
             if(shop_open)
                 draw_shop(&bag, marks, shop_sell_tab, shop_cur);
         }

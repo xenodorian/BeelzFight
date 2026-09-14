@@ -46,21 +46,26 @@ PROPS = {
     'crate':      ('props/crate.png', 24, 25),
 }
 
-# name -> source PNG relative to public/sprites, single standing
-# frame each (frame 1, down-facing where the source has directions).
+# name -> source PNG pattern (%d substitutes the frame number 1-4)
+# relative to public/sprites, down-facing where the source has
+# directions. All 4 idle frames are pulled now (drawWorld()'s
+# `Math.floor(this.clock * 4) % 4 + 1` for these, `* 3` for Shinigami
+# -- see main.c's draw_npcs for the per-frame timing), not just frame
+# 1: these NPCs stand still but still idle-animate in the reference.
 # Mason/Anne/soldier are NOT here -- they actually walk (approach/
 # patrol/chase), so they get the same full 4-direction x 4-frame
 # treatment as the player instead (see WALKERS below).
 NPCS = {
-    'wren':    'npc/wren-1.png',
-    'mae':     'npc/mae-1.png',
-    'ivo':     'npc/ivo-1.png',
-    'nell':    'npc/nell-1.png',
-    'pike':    'npc/pike-1.png',
-    'bram':    'npc/bram-1.png',
-    'calder':  'npc/calder-1.png',
-    'shinigami': 'shinigami/down-1.png',
+    'wren':    'npc/wren-%d.png',
+    'mae':     'npc/mae-%d.png',
+    'ivo':     'npc/ivo-%d.png',
+    'nell':    'npc/nell-%d.png',
+    'pike':    'npc/pike-%d.png',
+    'bram':    'npc/bram-%d.png',
+    'calder':  'npc/calder-%d.png',
+    'shinigami': 'shinigami/down-%d.png',
 }
+NPC_FRAMES = [1, 2, 3, 4]
 
 # Walking actors: full walk cycle like the player, for the ones that
 # actually move (Mason and Anne approach the player, soldiers patrol/
@@ -78,14 +83,17 @@ WALKERS = {
 CATHLEEN_WORLD_SRC = 'monsters/cathleen/1.png'
 CATHLEEN_WORLD_W, CATHLEEN_WORLD_H = 28, 28
 
-# species id -> monsters/<id>/1.png. Sizes vary per species in the
-# source art (112x91 up to 200x200); all downscaled to one fixed
-# battle-sprite box for a consistent battle-screen layout, accepting
-# minor aspect squish on the non-square ones.
+# species id -> monsters/<id>/%d.png, all 4 frames (drawBattle()'s own
+# `Math.floor(b.t * 4) % 4 + 1`, shared by both the foe and the
+# player's own sprite -- see main.c's draw_battle_sprites). Sizes vary
+# per species in the source art (112x91 up to 200x200); all downscaled
+# to one fixed battle-sprite box for a consistent battle-screen
+# layout, accepting minor aspect squish on the non-square ones.
 MONSTERS = [
     'quillpup', 'glimmoth', 'tortcask', 'razorbat', 'mossback',
     'briarfox', 'fenwisp', 'duskhorn', 'needleroot', 'cathleen', 'crymare',
 ]
+MONSTER_FRAMES = [1, 2, 3, 4]
 MONSTER_W, MONSTER_H = 56, 56
 
 # render.lua's drawBattle() draws this (sprites.lua's "bg" key) behind
@@ -163,10 +171,11 @@ def main():
     lines.append('#define NPC_SPRITE_W %d' % ACTOR_DST_W)
     lines.append('#define NPC_SPRITE_H %d' % ACTOR_DST_H)
     lines.append('')
-    for name, relpath in NPCS.items():
-        im = Image.open(os.path.join(root, relpath))
-        pixels = encode(im, ACTOR_DST_W, ACTOR_DST_H)
-        emit_array(lines, 'npc_%s' % name, pixels, ACTOR_DST_W, ACTOR_DST_H)
+    for name, pattern in NPCS.items():
+        for f in NPC_FRAMES:
+            im = Image.open(os.path.join(root, pattern % f))
+            pixels = encode(im, ACTOR_DST_W, ACTOR_DST_H)
+            emit_array(lines, 'npc_%s_%d' % (name, f), pixels, ACTOR_DST_W, ACTOR_DST_H)
 
     for name, reldir in WALKERS.items():
         for d in PLAYER_DIRS:
@@ -186,9 +195,10 @@ def main():
     lines.append('#define MONSTER_SPRITE_H %d' % MONSTER_H)
     lines.append('')
     for name in MONSTERS:
-        im = Image.open(os.path.join(root, 'monsters', name, '1.png'))
-        pixels = encode(im, MONSTER_W, MONSTER_H)
-        emit_array(lines, 'monster_%s' % name, pixels, MONSTER_W, MONSTER_H)
+        for f in MONSTER_FRAMES:
+            im = Image.open(os.path.join(root, 'monsters', name, '%d.png' % f))
+            pixels = encode(im, MONSTER_W, MONSTER_H)
+            emit_array(lines, 'monster_%s_%d' % (name, f), pixels, MONSTER_W, MONSTER_H)
 
     lines.append('#define BATTLE_BG_W %d' % BATTLE_BG_W)
     lines.append('#define BATTLE_BG_H %d' % BATTLE_BG_H)
