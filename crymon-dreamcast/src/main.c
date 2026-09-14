@@ -204,6 +204,32 @@ static void blit_sprite(const u16 *px, int w, int h, int x, int y) {
     }
 }
 
+/* Shiny palette swap: no second set of source art exists for shiny
+   CryMon (see mint_shiny()), so this recolors the existing battle
+   sprite at blit time instead -- swap the 5-bit R/G565's B channels
+   (a cheap, cheerful "basic palette swap" that turns e.g. a green
+   Quillpup magenta/teal) and nudge green down a notch so the swap
+   reads as a genuinely different color rather than just a channel
+   shuffle on near-gray pixels. */
+static u16 shiny_tint(u16 c) {
+    u16 r = (u16)((c >> 11) & 0x1F);
+    u16 g = (u16)((c >> 5) & 0x3F);
+    u16 b = (u16)(c & 0x1F);
+    u16 g2 = (u16)(g > 8 ? g - 8 : 0);
+    return (u16)((b << 11) | (g2 << 5) | r);
+}
+
+static void blit_sprite_shiny(const u16 *px, int w, int h, int x, int y) {
+    int sx, sy;
+    for(sy = 0; sy < h; sy++) {
+        for(sx = 0; sx < w; sx++) {
+            u16 c = px[sy * w + sx];
+            if(c != SPRITE_KEY)
+                put_pixel(x + sx, y + sy, shiny_tint(c));
+        }
+    }
+}
+
 /* ----------------------------------------------------------------------
  * Font: 8x8, 1bpp glyphs, A-Z/0-9/space plus a handful of hand-added
  * symbol glyphs further down (-+/ for stat/damage text, then
@@ -1415,6 +1441,7 @@ typedef struct {
     int species;
     int lv, xp;
     int maxHp, hp, str, agl, spc, spp, sppMax;
+    int shiny; /* see mint_shiny() below */
 } Monster;
 
 /* xorshift32, seeded from the frame counter at title-screen dismissal
@@ -1473,7 +1500,26 @@ static Monster mint_monster(int species, int lv) {
     m.spp = s->spp;
     m.sppMax = s->spp;
     m.hp = m.maxHp;
+    m.shiny = 0;
     return m;
+}
+
+/* Shiny variant: a rare (1/64) wild-encounter-only recolor, minted at
+   double the level try_encounter() would otherwise have picked, with
+   an extra move (TOXIC BURST, see battle_pick_toxic()) no normal
+   CryMon of the species has. Never rolled for a scripted trainer/NPC
+   fight (Mason's Glimmoth, Calder's Razorbat, etc. mint_monster()
+   directly) or for Cathleen -- only try_encounter()'s wild pool calls
+   this. The "palette swap" itself lives in draw_battle_sprites(),
+   which recolors the sprite at blit time rather than needing a second
+   set of source art (none exists). */
+static Monster mint_shiny(int species, int lv) {
+    Monster m = mint_monster(species, lv * 2);
+    m.shiny = 1;
+    return m;
+}
+static int roll_shiny(void) {
+    return irand(0, 63) == 0;
 }
 
 /* data.grantXp: +6+4*foeLv xp per win, level up (+3 maxHp, +1 each
@@ -1599,6 +1645,7 @@ static void draw_party_menu(const Monster *party, int party_n, int lead, int par
             u16 color = (i == lead) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
             int n = s_cat(buf, 0, (i == party_cur) ? "*" : " ");
             n = s_cat(buf, n, (i == lead) ? "> " : "  ");
+            if(party[i].shiny) n = s_cat(buf, n, "SHINY ");
             n = s_cat(buf, n, SPECIES[party[i].species].name);
             n = s_cat(buf, n, " LV");
             n = s_cat_uint(buf, n, party[i].lv);
@@ -1646,6 +1693,7 @@ typedef struct {
     int cur;        /* menu cursor for phases 1-3 */
     int mods_self_str, mods_self_agl, mods_self_spc;
     int mods_foe_str, mods_foe_agl, mods_foe_spc;
+    int pl_poisoned, foe_poisoned; /* TOXIC BURST, shiny-exclusive move */
     float mg;       /* special-move timing needle, 0-100 */
     int mg_dir;
     int dmg;
@@ -1740,7 +1788,20 @@ static int battle_cast_spell(Battle *b, int spell_id, int from_player, int *out_
 }
 
 static void battle_apply_hit(Battle *b) {
-    int n;
+    int n, poison_tick = 0;
+
+    /* TOXIC BURST's ongoing chip damage: ticks whatever poison state
+       the foe was ALREADY carrying into this turn, before this turn's
+       own attack lands -- battle_pick_toxic() only marks foe_poisoned
+       afterward, so a freshly-inflicted poison doesn't also tick the
+       same turn it's applied. */
+    if(b->foe_poisoned) {
+        poison_tick = b->foe.maxHp / 16;
+        if(poison_tick < 1) poison_tick = 1;
+        b->foe.hp -= poison_tick;
+        if(b->foe.hp < 0) b->foe.hp = 0;
+    }
+
     b->foe.hp -= b->dmg;
     if(b->foe.hp < 0) b->foe.hp = 0;
 
@@ -1748,6 +1809,10 @@ static void battle_apply_hit(Battle *b) {
     n = s_cat(b->msg[0], n, " ");
     n = s_cat_uint(b->msg[0], n, b->dmg);
     n = s_cat(b->msg[0], n, " DMG");
+    if(poison_tick > 0) {
+        n = s_cat(b->msg[0], n, " PSN-");
+        n = s_cat_uint(b->msg[0], n, poison_tick);
+    }
     b->msg[0][n] = 0;
 
     if(b->foe.hp <= 0) {
@@ -1766,6 +1831,7 @@ static void battle_apply_hit(Battle *b) {
             if(b->bench_n == 2) b->bench[0] = b->bench[1];
             b->bench_n--;
             b->mods_foe_str = b->mods_foe_agl = b->mods_foe_spc = 0;
+            b->foe_poisoned = 0; /* fresh bench monster, not the fallen one */
 
             n = s_cat(b->msg[1], 0, fallen);
             n = s_cat(b->msg[1], n, " FALLS");
@@ -1803,6 +1869,26 @@ static void battle_pick_basic(Battle *b) {
     n = s_cat(b->label, n, SPECIES[b->pl.species].basic);
     b->label[n] = 0;
     battle_apply_hit(b);
+}
+
+/* TOXIC BURST: the shiny-exclusive move (see mint_shiny()). Weaker
+   than the plain basic move on its own, but poisons the foe for
+   ongoing chip damage every subsequent turn -- see the poison_tick
+   handling in battle_apply_hit()/battle_pick_guard(). Only offered to
+   a shiny player lead (draw_battle_atk_menu/main()'s phase-2 dispatch
+   add the extra row); no PP cost, always available, matching the
+   "rare but not fussy" spirit of a shiny encounter. */
+static void battle_pick_toxic(Battle *b) {
+    int atk = b->pl.str + b->mods_self_str;
+    int def = b->foe.str + b->mods_foe_str;
+    int n = 0;
+
+    b->dmg = jground(4.0f + (float)atk * 0.5f - (float)def * 0.16f + (float)irand(0, 2));
+    if(b->dmg < 1) b->dmg = 1;
+    n = s_cat(b->label, n, "TOXIC BURST");
+    b->label[n] = 0;
+    battle_apply_hit(b);
+    b->foe_poisoned = 1;
 }
 
 /* pickAtk's special-move branch: engine.ts's timing minigame (mg
@@ -1866,8 +1952,34 @@ static void battle_pick_guard(Battle *b, int kind, Monster *party, int party_n, 
     const char *move_name;
     float base;
     int atk_stat, def_stat, chance, success, dmg;
-    char line[40];
+    char line[56];
     int n = 0;
+    int poison_tick = 0;
+    int inflicts_poison = 0;
+
+    /* TOXIC BURST's chip damage on the player's side, same ordering
+       as battle_apply_hit()'s foe-side tick: whatever poison state
+       came INTO this turn ticks first, before this turn's own guard
+       result is resolved. */
+    if(b->pl_poisoned) {
+        poison_tick = b->pl.maxHp / 16;
+        if(poison_tick < 1) poison_tick = 1;
+        b->pl.hp -= poison_tick;
+        if(b->pl.hp < 0) b->pl.hp = 0;
+    }
+
+    /* A shiny foe has a chance to reach for its own TOXIC BURST
+       instead of the usual basic/special ladder, same shape as the
+       Cathleen spell branch below (goto guard_chance) -- skipped
+       once the player's already poisoned, same one-application-at-a-
+       time rule battle_pick_toxic() follows for the player's side. */
+    if(b->foe.shiny && !b->pl_poisoned && irand(0, 99) < 30) {
+        atk_stat = b->foe.str + b->mods_foe_str;
+        base = 4.0f + (float)atk_stat * 0.5f - (float)(b->pl.str + b->mods_self_str) * 0.16f;
+        move_name = "TOXIC BURST";
+        inflicts_poison = 1;
+        goto guard_chance;
+    }
 
     /* resolve_guard()'s spell branch: Cathleen never uses the plain
        basic/special ladder below, she casts one of her 4 spells
@@ -1965,10 +2077,18 @@ guard_chance:
             n = s_cat(line, n, " DMG");
         }
     }
+    if(poison_tick > 0) {
+        n = s_cat(line, n, " PSN-");
+        n = s_cat_uint(line, n, poison_tick);
+    }
+    else if(inflicts_poison) {
+        n = s_cat(line, n, " PSN");
+    }
     line[n] = 0;
 
     b->pl.hp -= dmg;
     if(b->pl.hp < 0) b->pl.hp = 0;
+    if(inflicts_poison) b->pl_poisoned = 1;
     party[*lead] = b->pl;
 
     if(b->pl.hp <= 0) {
@@ -1982,6 +2102,7 @@ guard_chance:
         if(nxt >= 0) {
             *lead = nxt;
             b->pl = party[nxt];
+            b->pl_poisoned = 0; /* fresh monster, not the fallen one */
             n = s_cat(b->msg[1], 0, SPECIES[b->pl.species].name);
             n = s_cat(b->msg[1], n, " JUMPS IN");
             b->msg[1][n] = 0;
@@ -2155,13 +2276,13 @@ static int try_encounter(int map_id, int px, int py, int party_n,
         lv = 2 + (ty > 14 ? 1 : 0) + irand(0, 1);
     }
 
-    out->foe = mint_monster(id, lv);
+    out->foe = roll_shiny() ? mint_shiny(id, lv) : mint_monster(id, lv);
     out->wild = 1;
     out->trainer_kind = TRAINER_WILD;
     out->soldier_id = 0;
     out->bench_n = 0;
     out->phase = 0;
-    n = s_cat(out->msg[0], 0, "A WILD ");
+    n = s_cat(out->msg[0], 0, out->foe.shiny ? "A SHINY " : "A WILD ");
     n = s_cat(out->msg[0], n, SPECIES[id].name);
     out->msg[0][n] = 0;
     out->msg_n = 1;
@@ -2170,6 +2291,7 @@ static int try_encounter(int map_id, int px, int py, int party_n,
     out->cur = 0;
     out->mods_self_str = out->mods_self_agl = out->mods_self_spc = 0;
     out->mods_foe_str = out->mods_foe_agl = out->mods_foe_spc = 0;
+    out->pl_poisoned = out->foe_poisoned = 0;
     out->mg = 8.0f;
     out->mg_dir = 1;
     out->grew = 0;
@@ -2250,10 +2372,18 @@ static const u16 *const MONSTER_SPRITES[11][4] = {
    frame_count/15 matches the same 4fps cadence draw_npc_idle() uses. */
 static void draw_battle_sprites(const Battle *b, u32 frame_count) {
     int f = (int)((frame_count / 15u) % 4u);
-    blit_sprite(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                BFOE_SPRITE_X, BFOE_SPRITE_Y);
-    blit_sprite(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                BPL_SPRITE_X, BPL_SPRITE_Y);
+    if(b->foe.shiny)
+        blit_sprite_shiny(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                           BFOE_SPRITE_X, BFOE_SPRITE_Y);
+    else
+        blit_sprite(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                    BFOE_SPRITE_X, BFOE_SPRITE_Y);
+    if(b->pl.shiny)
+        blit_sprite_shiny(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                           BPL_SPRITE_X, BPL_SPRITE_Y);
+    else
+        blit_sprite(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                    BPL_SPRITE_X, BPL_SPRITE_Y);
 }
 
 static void draw_battle_status(const Battle *b) {
@@ -2261,7 +2391,8 @@ static void draw_battle_status(const Battle *b) {
     int n;
 
     draw_box(BFOE_BOX_X, BFOE_BOX_Y, BFOE_BOX_W, BFOE_BOX_H);
-    n = s_cat(buf, 0, SPECIES[b->foe.species].name);
+    n = s_cat(buf, 0, b->foe.shiny ? "*" : "");
+    n = s_cat(buf, n, SPECIES[b->foe.species].name);
     n = s_cat(buf, n, " LV");
     n = s_cat_uint(buf, n, b->foe.lv);
     buf[n] = 0;
@@ -2274,7 +2405,8 @@ static void draw_battle_status(const Battle *b) {
     draw_text_s(buf, BFOE_BOX_X + 6, BFOE_BOX_Y + 4 + MENU_ROW_H, rgb565(197, 206, 198), MENU_SCALE);
 
     draw_box(BPL_BOX_X, BPL_BOX_Y, BPL_BOX_W, BPL_BOX_H);
-    n = s_cat(buf, 0, SPECIES[b->pl.species].name);
+    n = s_cat(buf, 0, b->pl.shiny ? "*" : "");
+    n = s_cat(buf, n, SPECIES[b->pl.species].name);
     n = s_cat(buf, n, " LV");
     n = s_cat_uint(buf, n, b->pl.lv);
     buf[n] = 0;
@@ -2424,7 +2556,14 @@ static void draw_battle_atk_menu(const Battle *b, int cur) {
     buf[n] = 0;
     draw_battle_menu_row(buf, 1, cur, y); y += MENU_ROW_H;
 
-    draw_battle_menu_row("WAIT", 2, cur, y);
+    /* Extra row, shiny leads only -- see battle_pick_toxic(). */
+    if(b->pl.shiny) {
+        draw_battle_menu_row("TOXIC BURST", 2, cur, y); y += MENU_ROW_H;
+        draw_battle_menu_row("WAIT", 3, cur, y);
+    }
+    else {
+        draw_battle_menu_row("WAIT", 2, cur, y);
+    }
 }
 
 static void draw_battle_guard_menu(int cur) {
@@ -3130,7 +3269,8 @@ void main(void) {
             else {
                 int n_rows = (battle.phase == 1) ? battle_item_menu_count(&bag)
                              : (battle.phase == 2 && SPECIES[battle.pl.species].spells_n > 0)
-                                 ? SPECIES[battle.pl.species].spells_n : 3;
+                                 ? SPECIES[battle.pl.species].spells_n
+                             : (battle.phase == 2 && battle.pl.shiny) ? 4 : 3;
 
                 if(up_now && !prev_up)
                     battle.cur = (battle.cur - 1 + n_rows) % n_rows;
@@ -3186,6 +3326,10 @@ void main(void) {
                                 battle.mg_dir = 1;
                                 battle.phase = 4;
                             }
+                        }
+                        else if(battle.pl.shiny && battle.cur == 2) {
+                            battle_pick_toxic(&battle);
+                            party[lead] = battle.pl;
                         }
                         else {
                             int n = s_cat(battle.msg[0], 0, "MAX HOLDS");
@@ -3612,6 +3756,7 @@ void main(void) {
                                     battle.cur = 0;
                                     battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
                                     battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
                                     battle.bench_n = 0;
                                     battle.grew = 0;
                                     battle.pl = party[lead];
@@ -3628,6 +3773,7 @@ void main(void) {
                                     battle.cur = 0;
                                     battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
                                     battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
                                     battle.bench_n = 0;
                                     battle.grew = 0;
                                     battle.pl = party[lead];
@@ -3644,6 +3790,7 @@ void main(void) {
                                     battle.cur = 0;
                                     battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
                                     battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
                                     battle.bench[0] = mint_monster(SP_CRYMARE, 6);
                                     battle.bench[1] = mint_monster(SP_CRYMARE, 7);
                                     battle.bench_n = 2;
@@ -3667,6 +3814,7 @@ void main(void) {
                                     battle.cur = 0;
                                     battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
                                     battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
                                     battle.bench_n = 0;
                                     battle.grew = 0;
                                     battle.pl = party[lead];
@@ -3686,6 +3834,7 @@ void main(void) {
                                         battle.cur = 0;
                                         battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
                                         battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
                                         battle.bench_n = 0;
                                         battle.grew = 0;
                                         battle.pl = party[lead];
