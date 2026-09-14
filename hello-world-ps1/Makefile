@@ -24,13 +24,16 @@ hello.elf: $(OBJS) ps1.ld
 hello.exe: hello.elf
 	$(OBJCOPY) -O binary -R .bss $< $@
 
-# Requires exe2iso (https://github.com/grumpycoders/pcsx-redux/tree/main/tools/exe2iso)
-# on PATH -- see README.md for how to build it. Produces hello.bin (raw
-# 2352-byte-sector CD-XA image); pair it with hello.cue to mount/boot it.
-iso: hello.exe
-	exe2iso hello.exe -o hello.bin
+# Requires mkpsxiso (https://github.com/Lameguy64/mkpsxiso) on PATH.
+# Builds a standard SYSTEM.CNF-booting disc: hello.exe (this tiny boot
+# executable) plus IMAGE.BIN (the raw image data, read off the disc at
+# runtime -- see src/hello.c for why it isn't baked into hello.exe).
+# IMAGE.BIN's LBA is fixed by iso.xml's file order and hardcoded in
+# hello.c as IMAGE_LBA; re-run with -lba if the layout ever changes.
+disc: hello.exe
+	mkpsxiso -y iso.xml
 
 clean:
-	rm -f $(OBJS) hello.elf hello.exe hello.bin
+	rm -f $(OBJS) hello.elf hello.exe hello.bin hello.cue
 
-.PHONY: all iso clean
+.PHONY: all disc clean

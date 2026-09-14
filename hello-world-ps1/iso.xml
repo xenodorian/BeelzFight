@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<iso_project image_name="hello.bin" cue_sheet="hello.cue">
+	<track type="data">
+		<identifiers
+			system="PLAYSTATION"
+			application="PLAYSTATION"
+			volume="HELLO"
+			volume_set="HELLO"
+			publisher="BEELZFIGHT"
+			data_preparer="MKPSXISO"
+		/>
+		<directory_tree>
+			<file name="system.cnf" type="data" source="SYSTEM.CNF"/>
+			<file name="image.bin" type="data" source="src/assets/image_rgb555.bin"/>
+			<file name="hello.exe" type="data" source="hello.exe"/>
+			<dummy sectors="1024" type="0"/>
+		</directory_tree>
+	</track>
+</iso_project>
