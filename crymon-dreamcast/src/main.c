@@ -16,59 +16,31 @@
  *
  * Known, deliberate departures from the reference -- each is also
  * called out inline at the relevant code, this is just the index:
- *   - No real-time chase AI: state.lua's soldiers (patrol + line-of-
- *     sight + chase), Mason (force-walks toward the player after the
- *     house door), and Anne (same, after your first battle) are
- *     ported as stationary proximity-interact NPCs instead -- see the
- *     world-NPC section comment. The mechanical outcome (you cannot
- *     reach Calder without fighting the soldiers/Mason; Anne's gift
- *     is still obtainable) is unchanged; only the chase presentation
- *     is cut.
- *   - Anne IS ported -- a correction from an earlier pass here that
- *     wrongly concluded she was unreachable (see the world-NPC
- *     section comment for the full story: the Lua intermediate is
- *     missing a call site the canonical engine.ts actually has).
- *   - Cathleen fights using the generic wild-monster basic/special AI
- *     (her SPECIES entry's real move names still show correctly),
- *     not her unique castSpell() kit (Fire Bolt/Ice Beam/Lightning
- *     Strike/Mana Surge) -- see the battle-system section comment.
- *   - No item icons, no manual party lead-switch menu, no manual
- *     in-battle item "switch to bench monster" row -- text-only UI
- *     throughout, and the automatic emergency swap-in on a guard-
- *     phase faint is ported (state.lua does this one automatically
- *     too), just not the player-chosen version.
- *   - The post-win "grew to lv N"/"stands over the grass" toast has
- *     no timed-fade HUD to live in here, so it's one extra clickable
- *     battle message instead (BAFTER_WIN_NOTE) -- see the battle
- *     section comment.
- *   - Returning to the title screen after an ending does not reset
- *     game state the way state.lua's resetRun() does: this port's
- *     world/party/flags are plain locals in main(), initialized once
- *     before the main loop rather than re-initializable mid-function
- *     without a larger restructure. A single playthrough (title all
- *     the way to an ending) works correctly; starting a second run in
- *     the same boot session will resume with whatever party/flags/
- *     marks the first run left behind rather than a fresh save. Power
- *     -cycling (or a fresh emulator boot) is the workaround.
- *   - Sprites: the player (4-frame walk cycle per direction), the 4
- *     HOUSE props, every world NPC (single standing frame each -- no
- *     walk/idle animation, since they're all stationary in this port
- *     anyway), and every fightable species' battle art (single frame)
- *     all use real pixel art now (tools/gen_sprites.py, from
- *     public/sprites/ -- see draw_player/draw_npcs/
- *     MONSTER_SPRITES/draw_battle_sprites, the latter now drawing
- *     both the foe and the player's own active CryMon). Map tiles
- *     still draw
- *     as flat color blocks (paintTile's own palette, ported in full
- *     -- see draw_tile); the reference itself does this too for
- *     terrain (draw.lua's paintTile is flat rectangles in the LÖVE
- *     build as well, not a tileset image).
- *   - No player-side battle sprite (screen space on a 320x240 panel
- *     with a monster sprite, status text, and a menu already in it;
- *     the player's walk sprite is constantly visible on the world map
- *     regardless). No idle animation on the battle monster sprite
- *     (species folders have 4 frames in the source; only frame 1 is
- *     used here).
+ *   - No item icons, no manual in-battle "switch to bench monster"
+ *     item-menu row -- text-only bag/shop UI, and the automatic
+ *     emergency swap-in on a guard-phase faint is ported (state.lua
+ *     does this one automatically too), just not the player-chosen
+ *     mid-turn version. (Manual party *lead* switching, engine.ts's
+ *     cycleParty(to), IS ported -- see the party-menu section
+ *     comment.)
+ *   - Sprites: the player and the 3 walking world actors (Mason, Anne,
+ *     FOREST soldiers) get a real 4-frame walk cycle per direction;
+ *     every other world NPC and every fightable species' battle art is
+ *     a single standing/idle frame (the source has more frames for
+ *     some of these, e.g. species folders' frames 2-4, but they're
+ *     never sampled here -- no idle-breathing/blink animation on
+ *     anything that doesn't actually walk). Map tiles still draw as
+ *     flat color blocks (paintTile's own palette, ported in full --
+ *     see draw_tile); the reference itself does this too for terrain
+ *     (draw.lua's paintTile is flat rectangles in the LÖVE build as
+ *     well, not a tileset image).
+ *   - Dialogue/UI text is upper-cased and stripped of most punctuation
+ *     (apostrophes, periods, commas, quotes) to fit this port's own
+ *     hand-authored 8x8 bitmap font, which only has A-Z/0-9/space/+/-
+ *     //glyphs -- see the font section comment. The reference's actual
+ *     mixed-case, fully punctuated TALK_* text is preserved in this
+ *     port's own dialogue-array comments where it'd otherwise be
+ *     ambiguous, but every on-screen line is the depunctuated version.
  */
 
 #include <stdint.h>
@@ -1238,6 +1210,19 @@ static void draw_dialogue_box(const char *line) {
                  DIALOGUE_MAX_CHARS, DIALOGUE_LINE_H);
 }
 
+/* HUD toast (state.lua's G.hud/note()): a small one-line banner near
+   the top of the screen, distinct from the dialogue box at the bottom
+   so the two are never confused even though they never actually show
+   at once (say() always clears hudT, and every note() call site is
+   reached from plain world state, not mid-dialogue). */
+static void draw_hud_toast(const char *text) {
+    int w = SCREEN_W - 40;
+    fill_rect(20, 6, w, 16, rgb565(18, 17, 14));
+    fill_rect(20, 6, w, 1, rgb565(197, 206, 198));
+    fill_rect(20, 21, w, 1, rgb565(197, 206, 198));
+    draw_text_s(text, 26, 10, rgb565(232, 228, 216), DIALOGUE_SCALE);
+}
+
 /* Small HUD in the screen's top-left corner (fixed there regardless
    of camera position), showing what interacting has granted so far
    -- there's no inventory/party HUD overlay in the reference, but
@@ -1463,17 +1448,14 @@ static void draw_bag_menu(const Bag *bag, int marks) {
     draw_bag_row("CAPTURE CRYSTAL", bag->gem, y);
 }
 
-/* has_party mirrors state.lua's #G.party > 0; party_mon is the one
-   party slot this port supports (no PARTY_MAX-6 roster, no switching
-   -- Quillpup is the only species obtainable so far). Shows real,
-   current HP now that the battle system tracks it. */
 /* drawParty(): lists every party member (up to data.PARTY_MAX -- see
-   Monster party[6] in main()), not just the lead, with a ">" prefix
-   and brighter color on the lead, matching the reference exactly now
-   that captures can grow the roster past one. No manual lead-switch
-   UI (this port's own "1-6 lead" equivalent) -- see the bag/party
-   menu section comment on why. */
-static void draw_party_menu(const Monster *party, int party_n, int lead) {
+   Monster party[6] in main()), with a ">" prefix and brighter color on
+   the current lead, plus a cursor ("*") on party_cur -- cycleParty(to)
+   ported: pressing A on a living, non-lead row makes it the new lead
+   (main()'s menu_mode==2 input handling), matching the reference's
+   own Digit1-6 hotkeys adapted to a dpad+cursor since there's no
+   number row on a Dreamcast pad. */
+static void draw_party_menu(const Monster *party, int party_n, int lead, int party_cur) {
     int y = MENU_Y + 24;
 
     draw_menu_frame("CRYMON");
@@ -1483,7 +1465,8 @@ static void draw_party_menu(const Monster *party, int party_n, int lead) {
         for(i = 0; i < party_n; i++) {
             char buf[40];
             u16 color = (i == lead) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
-            int n = s_cat(buf, 0, (i == lead) ? "> " : "  ");
+            int n = s_cat(buf, 0, (i == party_cur) ? "*" : " ");
+            n = s_cat(buf, n, (i == lead) ? "> " : "  ");
             n = s_cat(buf, n, SPECIES[party[i].species].name);
             n = s_cat(buf, n, " LV");
             n = s_cat_uint(buf, n, party[i].lv);
@@ -1495,6 +1478,8 @@ static void draw_party_menu(const Monster *party, int party_n, int lead) {
             draw_text_s(buf, MENU_X + 8, y, color, MENU_SCALE);
             y += MENU_ROW_H;
         }
+        draw_text_s("A LEAD  B CLOSE", MENU_X + 8, MENU_Y + MENU_H - 16,
+                    rgb565(138, 134, 120), MENU_SCALE);
     }
     else {
         draw_text_s("NO CRYMON YET", MENU_X + 8, y, rgb565(138, 134, 120), MENU_SCALE);
@@ -1508,23 +1493,15 @@ static void draw_party_menu(const Monster *party, int party_n, int lead) {
  * both use this same struct/update loop, matching state.lua (which
  * shares updateBattle() between them too): trainer_kind names who
  * G.bTrainer would be, bench holds Shinigami's 2 backup CryMare
- * (data.lua's only nbench > 0 fight). Cathleen fights as a wild
- * (capturable) foe using the generic basic/special AI below rather
- * than her real castSpell() kit (Fire Bolt/Ice Beam/Lightning Strike/
- * Mana Surge) -- a deliberate simplification: her SPECIES entry's
- * basic/special names ("FIRE BOLT"/"MANA SURGE") still show correctly
- * in battle text, only the underlying formula differs from the
- * reference (generic str/spc-based instead of her unique spell
- * formulas). Soldiers/Mason/Anne are also simplified: stationary
- * proximity-interact NPCs rather than the reference's patrolling/
- * chasing real-time actors -- see the world NPC section further down
- * for why.
+ * (data.lua's only nbench > 0 fight). Cathleen's real castSpell() kit
+ * (Fire Bolt/Ice Beam/Lightning Strike/Mana Surge) is ported --
+ * battle_cast_spell()/battle_pick_spell(), further down -- for both
+ * her wild GROVE fight and as a captured player lead.
  *
- * One deliberate adaptation: state.lua's post-win "grew to lv N" /
- * "stands over the grass" line is a timed-fade G.hud toast
- * (note()/G.hudT), not a clickable message. This port has no
- * timed-fade HUD, so it's shown as one extra battle-message beat
- * (BAFTER_WIN_NOTE below) before returning to the world instead.
+ * The post-win "grew to lv N"/"stands over the grass" line is a real
+ * timed-fade HUD toast (main()'s hud_flash/hud_t, set at the tail of
+ * this switch below), matching state.lua's note()/G.hudT exactly
+ * instead of an extra clickable battle message.
  * ---------------------------------------------------------------------- */
 typedef struct {
     Monster pl, foe;
@@ -2642,6 +2619,17 @@ void main(void) {
        and select; B alone is enough here since neither Y nor START
        need a second meaning while a menu is open). */
     int menu_mode = 0;
+    int party_cur = 0; /* cursor row inside the party menu */
+
+    /* HUD toast, matching state.lua's G.hud/G.hudT/note(): a small
+       banner (lead-switch confirmation, the post-win "grew to lv N"/
+       "stands over the grass" line) that freezes world movement like
+       a dialogue box until it either times out or the player presses
+       A/B to dismiss it early. 720 frames at 60fps == note()'s own
+       12-second hudT budget. */
+    char hud_flash[40] = { 0 };
+    int hud_t = 0;
+#define HUD_NOTE_FRAMES 720
 
     /* Active dialogue sequence: seq_lines/seq_len name the current
        TALK_* array, seq_beat indexes into it. seq_lines == 0 means no
@@ -2760,7 +2748,8 @@ void main(void) {
                 party_n = 0; lead = 0;
                 in_battle = 0;
                 enc_lock = 8; last_tx = -1; last_ty = -1;
-                menu_mode = 0;
+                menu_mode = 0; party_cur = 0;
+                hud_flash[0] = 0; hud_t = 0;
                 seq_lines = 0; seq_len = 0; seq_beat = 0;
                 post_action = POST_NONE; post_soldier_id = 0;
                 talked_wren = talked_mae = talked_ivo = talked_nell = 0;
@@ -2785,9 +2774,26 @@ void main(void) {
             }
         }
         else if(menu_mode) {
-            /* state.lua's MODE.BAG/MODE.PARTY update: only closing is
-               handled, matching the reference (no cursor/use/swap
-               logic in this port's scope). */
+            /* state.lua's MODE.BAG/MODE.PARTY update: BAG has no
+               cursor/use logic in the reference either (items are
+               only usable from the battle item menu), but PARTY does
+               -- cycleParty(to), ported below. */
+            if(menu_mode == 2 && party_n > 0) {
+                if(up_now && !prev_up)
+                    party_cur = (party_cur - 1 + party_n) % party_n;
+                if(down_now && !prev_down)
+                    party_cur = (party_cur + 1) % party_n;
+                if(a_now && !prev_a) {
+                    if(party[party_cur].hp > 0 && party_cur != lead) {
+                        int n;
+                        lead = party_cur;
+                        n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
+                        n = s_cat(hud_flash, n, " TAKES THE LEAD");
+                        hud_flash[n] = 0;
+                        hud_t = HUD_NOTE_FRAMES;
+                    }
+                }
+            }
             if((b_now && !prev_b) || (start_now && !prev_start))
                 menu_mode = 0;
         }
@@ -2865,24 +2871,35 @@ void main(void) {
                                         enc_lock = 3;
                                     }
                                     else {
-                                        n = s_cat(battle.msg[0], 0, SPECIES[party[lead].species].name);
+                                        /* note(): a HUD toast, not a
+                                           clickable battle message --
+                                           the battle ends immediately,
+                                           same as the reference (which
+                                           sets mode="world" before
+                                           calling note()). */
+                                        n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
                                         if(battle.grew) {
-                                            n = s_cat(battle.msg[0], n, " GREW TO LV");
-                                            n = s_cat_uint(battle.msg[0], n, party[lead].lv);
+                                            n = s_cat(hud_flash, n, " GREW TO LV");
+                                            n = s_cat_uint(hud_flash, n, party[lead].lv);
                                         }
                                         else {
-                                            n = s_cat(battle.msg[0], n, " STANDS OVER THE GRASS");
+                                            n = s_cat(hud_flash, n, " STANDS OVER THE GRASS");
                                         }
-                                        battle.msg[0][n] = 0;
-                                        battle.msg_n = 1;
-                                        battle.msg_i = 0;
-                                        battle.phase = 0;
-                                        battle.after = BAFTER_WIN_NOTE;
+                                        hud_flash[n] = 0;
+                                        hud_t = HUD_NOTE_FRAMES;
+                                        in_battle = 0;
+                                        enc_lock = 3;
                                     }
                                 }
                                 break;
                             }
                             case BAFTER_WIN_NOTE:
+                                /* Dead as an actual battle.after target
+                                   now (the tail above ends the battle
+                                   directly), kept only so the #define
+                                   and this switch arm still exist for
+                                   anything that might still reference
+                                   the enum value. */
                                 in_battle = 0;
                                 enc_lock = 3;
                                 break;
@@ -3067,6 +3084,25 @@ void main(void) {
             if(door_lock > 0)
                 door_lock--;
 
+            /* HUD toast countdown/dismiss: ticks down every world
+               frame regardless (matches update()'s unconditional
+               `if (hudT > 0) hudT -= dt`), and A/B dismiss it early,
+               same as the reference's confirm()/cancel() check.
+               hud_dismissed_now suppresses the interact-chain further
+               down for this same frame -- otherwise the very A press
+               that dismisses the toast would immediately fall through
+               into a fresh interact/dialogue-advance check, the same
+               same-frame-reactivation bug the Mason ambush comment
+               elsewhere in this file describes. */
+            int hud_dismissed_now = 0;
+            if(hud_t > 0) {
+                hud_t--;
+                if((a_now && !prev_a) || (b_now && !prev_b)) {
+                    hud_t = 0;
+                    hud_dismissed_now = 1;
+                }
+            }
+
             /* maybeStartAnne(): battlesDone>=1 while on VELD, gated
                on not already talking (matches its !talking() check
                closely enough). Spawns her at the player's own spot
@@ -3212,7 +3248,7 @@ void main(void) {
                 }
             }
 
-            if(!seq_lines && mason_state != 1 && anne_state != 1) {
+            if(!seq_lines && hud_t <= 0 && mason_state != 1 && anne_state != 1) {
                 int dx = 0, dy = 0;
                 int map_w = MAPS[map_id].cols * TILE;
                 int map_h = MAPS[map_id].rows_n * TILE;
@@ -3347,7 +3383,7 @@ void main(void) {
                 }
             }
 
-            if(a_now && !prev_a) {
+            if(a_now && !prev_a && !hud_dismissed_now) {
                 if(seq_lines) {
                     /* Advance to the next beat; close the box (and
                        fire any queued post_action -- beginTalkEnd())
@@ -3818,10 +3854,12 @@ void main(void) {
             draw_hud(got_shelf, looted_crate, bag.bandage);
             if(seq_lines)
                 draw_dialogue_box(seq_lines[seq_beat]);
+            else if(hud_t > 0)
+                draw_hud_toast(hud_flash);
             if(menu_mode == 1)
                 draw_bag_menu(&bag, marks);
             else if(menu_mode == 2)
-                draw_party_menu(party, party_n, lead);
+                draw_party_menu(party, party_n, lead, party_cur);
             if(in_battle)
                 draw_battle(&battle, &bag);
             if(shop_open)
