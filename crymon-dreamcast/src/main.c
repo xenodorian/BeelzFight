@@ -2138,21 +2138,36 @@ static void draw_box(int x, int y, int w, int h) {
     fill_rect(x + w - 2, y, 2, h, rgb565(197, 206, 198));
 }
 
+/* Layout: foe status + foe sprite occupy the top row (status box
+   top-left, sprite top-right, classic JRPG split); the message/menu
+   box is anchored bottom-right instead of spanning the full screen
+   width, with the player's own status box directly above it (same
+   width/x); the player's sprite sits in the freed-up lower-left
+   corner, directly above the message/menu box -- not stacked with
+   the foe sprite in the corner the two used to share. BCONTENT_W is
+   sized for the item menu's longest row (see draw_battle_item_menu's
+   shortened labels) rather than the full screen, and BCONTENT_H for
+   its tallest phase (the item menu's up to 6 rows). */
 #define BFOE_BOX_X    4
 #define BFOE_BOX_Y    4
 #define BFOE_BOX_W    172
 #define BFOE_BOX_H    32
-#define BPL_BOX_X     4
-#define BPL_BOX_Y     40
-#define BPL_BOX_W     172
-#define BPL_BOX_H     32
-#define BSPRITE_X     (SCREEN_W - 8 - MONSTER_SPRITE_W)
+#define BFOE_SPRITE_X (SCREEN_W - 8 - MONSTER_SPRITE_W)
 #define BFOE_SPRITE_Y 4
-#define BPL_SPRITE_Y  (BFOE_SPRITE_Y + MONSTER_SPRITE_H + 4)
-#define BCONTENT_X    4
-#define BCONTENT_Y    (BPL_SPRITE_Y + MONSTER_SPRITE_H + 8)
-#define BCONTENT_W    (SCREEN_W - 8)
-#define BCONTENT_H    (SCREEN_H - 4 - BCONTENT_Y)
+
+#define BCONTENT_W    210
+#define BCONTENT_H    120
+#define BCONTENT_X    (SCREEN_W - 4 - BCONTENT_W)
+#define BCONTENT_Y    (SCREEN_H - 4 - BCONTENT_H)
+
+#define BPL_BOX_X     BCONTENT_X
+#define BPL_BOX_W     BCONTENT_W
+#define BPL_BOX_H     32
+#define BPL_BOX_Y     (BCONTENT_Y - 4 - BPL_BOX_H)
+
+#define BPL_SPRITE_X  8
+#define BPL_SPRITE_Y  (BCONTENT_Y - MONSTER_SPRITE_H - 4)
+
 #define BROW_H        16
 
 /* Index order matches SP_QUILLPUP..SP_CRYMARE and gen_sprites.py's
@@ -2180,9 +2195,9 @@ static const u16 *const MONSTER_SPRITES[11][4] = {
 static void draw_battle_sprites(const Battle *b, u32 frame_count) {
     int f = (int)((frame_count / 15u) % 4u);
     blit_sprite(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                BSPRITE_X, BFOE_SPRITE_Y);
+                BFOE_SPRITE_X, BFOE_SPRITE_Y);
     blit_sprite(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                BSPRITE_X, BPL_SPRITE_Y);
+                BPL_SPRITE_X, BPL_SPRITE_Y);
 }
 
 static void draw_battle_status(const Battle *b) {
@@ -2272,14 +2287,17 @@ static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
 
     draw_battle_menu_row("PASS", i++, cur, y); y += MENU_ROW_H;
 
+    /* Shortened from the bag menu's own full labels (MOSS SALVE UP TO
+       22 HP, etc.) -- BCONTENT_W is sized for these now that the box
+       is no longer full-screen-width, see the layout comment above. */
     if(bag->salve > 0) {
-        n = s_cat(buf, 0, "MOSS SALVE UP TO 22 HP X");
+        n = s_cat(buf, 0, "SALVE +22HP X");
         n = s_cat_uint(buf, n, bag->salve);
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->bandage > 0) {
-        n = s_cat(buf, 0, "LINEN WRAP UP TO 12 HP X");
+        n = s_cat(buf, 0, "WRAP +12HP X");
         n = s_cat_uint(buf, n, bag->bandage);
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
@@ -2291,13 +2309,13 @@ static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->dust > 0) {
-        n = s_cat(buf, 0, "ASH DUST STR-3 AGI-2 SPC-2 X");
+        n = s_cat(buf, 0, "DUST -3/-2/-2 X");
         n = s_cat_uint(buf, n, bag->dust);
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->gem > 0) {
-        n = s_cat(buf, 0, "CAPTURE CRYSTAL ");
+        n = s_cat(buf, 0, "CRYSTAL ");
         n = s_cat_uint(buf, n, battle_capture_chance(b));
         n = s_cat(buf, n, " PCT X");
         n = s_cat_uint(buf, n, bag->gem);
