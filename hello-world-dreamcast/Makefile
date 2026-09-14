@@ -15,7 +15,7 @@ all: hello.elf
 src/start.o: src/start.S
 	$(AS) $(ARCHFLAGS) -c -o $@ $<
 
-src/image_data.o: src/image_data.S src/assets/image_rgb565.bin
+src/image_data.o: src/image_data.S src/assets/img0_rgb565.bin src/assets/img1_rgb565.bin src/assets/img2_rgb565.bin
 	$(AS) $(ARCHFLAGS) -c -o $@ $<
 
 src/hello.o: src/hello.c

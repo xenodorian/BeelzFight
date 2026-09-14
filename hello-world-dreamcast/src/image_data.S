@@ -1,7 +1,14 @@
     .section .rodata
-    .global _image_rgb565
     .align 4
-_image_rgb565:
-    .incbin "src/assets/image_rgb565.bin"
-    .global _image_rgb565_end
-_image_rgb565_end:
+
+    .global _image0_rgb565
+_image0_rgb565:
+    .incbin "src/assets/img0_rgb565.bin"
+
+    .global _image1_rgb565
+_image1_rgb565:
+    .incbin "src/assets/img1_rgb565.bin"
+
+    .global _image2_rgb565
+_image2_rgb565:
+    .incbin "src/assets/img2_rgb565.bin"
