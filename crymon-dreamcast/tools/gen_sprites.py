@@ -97,6 +97,12 @@ MONSTER_W, MONSTER_H = 56, 56
 BATTLE_BG_SRC = 'battle-bg.png'
 BATTLE_BG_W, BATTLE_BG_H = 320, 240
 
+# Bag/shop/battle item-menu icons, one per data.ITEMS entry (id ->
+# items/<id>.png), downscaled to a small square that fits next to a
+# MENU_ROW_H=16 text row.
+ITEM_ICONS = ['salve', 'bandage', 'bitterroot', 'dust', 'gem']
+ITEM_ICON_W, ITEM_ICON_H = 14, 14
+
 def rgb565(r, g, b):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
@@ -189,6 +195,14 @@ def main():
     im = Image.open(os.path.join(root, BATTLE_BG_SRC))
     pixels = encode(im, BATTLE_BG_W, BATTLE_BG_H)
     emit_array(lines, 'battle_bg', pixels, BATTLE_BG_W, BATTLE_BG_H)
+
+    lines.append('#define ITEM_ICON_W %d' % ITEM_ICON_W)
+    lines.append('#define ITEM_ICON_H %d' % ITEM_ICON_H)
+    lines.append('')
+    for name in ITEM_ICONS:
+        im = Image.open(os.path.join(root, 'items', '%s.png' % name))
+        pixels = encode(im, ITEM_ICON_W, ITEM_ICON_H)
+        emit_array(lines, 'icon_%s' % name, pixels, ITEM_ICON_W, ITEM_ICON_H)
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')

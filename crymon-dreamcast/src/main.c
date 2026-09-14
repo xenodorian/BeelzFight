@@ -16,13 +16,16 @@
  *
  * Known, deliberate departures from the reference -- each is also
  * called out inline at the relevant code, this is just the index:
- *   - No item icons, no manual in-battle "switch to bench monster"
- *     item-menu row -- text-only bag/shop UI, and the automatic
- *     emergency swap-in on a guard-phase faint is ported (state.lua
- *     does this one automatically too), just not the player-chosen
- *     mid-turn version. (Manual party *lead* switching, engine.ts's
- *     cycleParty(to), IS ported -- see the party-menu section
- *     comment.)
+ *   - Item icons: bag and shop rows show the real items/ PNG icon
+ *     next to each item now; the battle item menu stays text-only
+ *     (its rows already run long with stat/percent text and BCONTENT_W
+ *     is a small fraction of the full-screen bag/shop menus).
+ *   - No manual in-battle "switch to bench monster" item-menu row --
+ *     the automatic emergency swap-in on a guard-phase faint is
+ *     ported (state.lua does this one automatically too), just not
+ *     the player-chosen mid-turn version. (Manual party *lead*
+ *     switching, engine.ts's cycleParty(to), IS ported -- see the
+ *     party-menu section comment.)
  *   - Sprites: the player and the 3 walking world actors (Mason, Anne,
  *     FOREST soldiers) get a real 4-frame walk cycle per direction;
  *     every other world NPC and every fightable species' battle art is
@@ -1419,13 +1422,24 @@ static void draw_menu_frame(const char *title) {
                 rgb565(90, 122, 82), MENU_SCALE);
 }
 
-static void draw_bag_row(const char *label, int count, int y) {
+/* ITEM_COUNT-indexed icon lookup (ITEM_SALVE..ITEM_GEM, defined
+   further down with the rest of the item-menu kinds) -- shared by the
+   bag, shop, and battle item-menu rows below, all of which previously
+   showed items as bare text. icon may be null (the item-menu's "PASS"
+   row has no matching icon). */
+static const u16 *const ITEM_ICONS[5] = {
+    icon_salve, icon_bandage, icon_bitterroot, icon_dust, icon_gem
+};
+
+static void draw_bag_row(const u16 *icon, const char *label, int count, int y) {
     char buf[32];
     int n = s_cat(buf, 0, label);
     n = s_cat(buf, n, " X");
     n = s_cat_uint(buf, n, count);
     buf[n] = 0;
-    draw_text_s(buf, MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE);
+    if(icon)
+        blit_sprite(icon, ITEM_ICON_W, ITEM_ICON_H, MENU_X + 8, y - 1);
+    draw_text_s(buf, MENU_X + 8 + ITEM_ICON_W + 4, y, rgb565(232, 228, 216), MENU_SCALE);
 }
 
 static void draw_bag_menu(const Bag *bag, int marks) {
@@ -1441,11 +1455,11 @@ static void draw_bag_menu(const Bag *bag, int marks) {
     draw_text_s(marks_buf, MENU_X + MENU_W - 8 - text_width_s(marks_buf, MENU_SCALE),
                 MENU_Y + 8, rgb565(143, 74, 64), MENU_SCALE);
 
-    draw_bag_row("MOSS SALVE", bag->salve, y);       y += MENU_ROW_H;
-    draw_bag_row("LINEN WRAP", bag->bandage, y);     y += MENU_ROW_H;
-    draw_bag_row("BITTERROOT", bag->bitterroot, y);  y += MENU_ROW_H;
-    draw_bag_row("ASH DUST", bag->dust, y);          y += MENU_ROW_H;
-    draw_bag_row("CAPTURE CRYSTAL", bag->gem, y);
+    draw_bag_row(icon_salve, "MOSS SALVE", bag->salve, y);            y += MENU_ROW_H;
+    draw_bag_row(icon_bandage, "LINEN WRAP", bag->bandage, y);        y += MENU_ROW_H;
+    draw_bag_row(icon_bitterroot, "BITTERROOT", bag->bitterroot, y);  y += MENU_ROW_H;
+    draw_bag_row(icon_dust, "ASH DUST", bag->dust, y);                y += MENU_ROW_H;
+    draw_bag_row(icon_gem, "CAPTURE CRYSTAL", bag->gem, y);
 }
 
 /* drawParty(): lists every party member (up to data.PARTY_MAX -- see
@@ -2134,6 +2148,17 @@ static void draw_battle_menu_row(const char *label, int idx, int cur, int y) {
     draw_text_s(label, BCONTENT_X + 16, y, color, MENU_SCALE);
 }
 
+/* Icon variant of the above, for menus with room for one (the shop --
+   the battle item menu's own rows stay text-only, BCONTENT_W is
+   already tight against their longer stat strings). */
+static void draw_menu_row_icon(const u16 *icon, const char *label, int idx, int cur, int y) {
+    u16 color = (idx == cur) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
+    draw_text_s(idx == cur ? ">" : " ", MENU_X + 8, y, color, MENU_SCALE);
+    if(icon)
+        blit_sprite(icon, ITEM_ICON_W, ITEM_ICON_H, MENU_X + 16, y - 1);
+    draw_text_s(label, MENU_X + 16 + ITEM_ICON_W + 4, y, color, MENU_SCALE);
+}
+
 /* Row count/kind-at-cursor for the item menu, kept in exact lockstep
    with draw_battle_item_menu's own conditional row order below (both
    walk PASS, salve, bandage, bitterroot, dust, gem in that order,
@@ -2510,7 +2535,7 @@ static void draw_shop(const Bag *bag, int marks, int sell_tab, int cur) {
         rn = s_cat(row, rn, "M X");
         rn = s_cat_uint(row, rn, owned);
         row[rn] = 0;
-        draw_battle_menu_row(row, i, cur, y);
+        draw_menu_row_icon(ITEM_ICONS[idx], row, i, cur, y);
         y += MENU_ROW_H;
     }
 }
