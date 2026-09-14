@@ -49,12 +49,23 @@
  *     the same boot session will resume with whatever party/flags/
  *     marks the first run left behind rather than a fresh save. Power
  *     -cycling (or a fresh emulator boot) is the workaround.
- *   - Sprites: only the player (max) and the 4 HOUSE props use real
- *     pixel art (tools/gen_sprites.py, from public/sprites/); every
- *     NPC and every map tile still draws as flat color blocks
- *     (paintTile's own palette, ported in full -- see draw_tile).
- *   - No animation frames anywhere (player, or the props) -- every
- *     sprite is its single static down/up/left/right pose.
+ *   - Sprites: the player (4-frame walk cycle per direction), the 4
+ *     HOUSE props, every world NPC (single standing frame each -- no
+ *     walk/idle animation, since they're all stationary in this port
+ *     anyway), and every fightable species' battle art (single frame)
+ *     all use real pixel art now (tools/gen_sprites.py, from
+ *     public/sprites/ -- see draw_player/draw_npcs/
+ *     MONSTER_SPRITES/draw_battle_foe_sprite). Map tiles still draw
+ *     as flat color blocks (paintTile's own palette, ported in full
+ *     -- see draw_tile); the reference itself does this too for
+ *     terrain (draw.lua's paintTile is flat rectangles in the LÖVE
+ *     build as well, not a tileset image).
+ *   - No player-side battle sprite (screen space on a 320x240 panel
+ *     with a monster sprite, status text, and a menu already in it;
+ *     the player's walk sprite is constantly visible on the world map
+ *     regardless). No idle animation on the battle monster sprite
+ *     (species folders have 4 frames in the source; only frame 1 is
+ *     used here).
  */
 
 #include <stdint.h>
@@ -856,16 +867,64 @@ static void draw_props(int map_id, int cam_x, int cam_y) {
     draw_prop('C', prop_crate, PROP_CRATE_W, PROP_CRATE_H, cam_x, cam_y);
 }
 
+/* World NPCs: bottom-anchored on their mark's tile like the player
+   (feet at the tile center), matching render.lua's actor placement.
+   All stationary single-frame sprites -- see the world-NPC section
+   comment further down for why (no walk/idle animation ported for
+   any of them, unlike the player). */
+static void draw_npc(int map_id, char mark, const u16 *px, int w, int h, int cam_x, int cam_y) {
+    int cx, cy;
+    mark_center(map_id, mark, &cx, &cy);
+    blit_sprite(px, w, h, cx - cam_x - w / 2, cy - cam_y - h);
+}
+
+static void draw_npcs(int map_id, int cam_x, int cam_y, int mason_spawned, int cath_caught) {
+    if(map_id == MAP_VELD) {
+        draw_npc(map_id, 'K', npc_wren, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, 'I', npc_mae, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, 'V', npc_ivo, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, 'A', npc_nell, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, 'Q', npc_pike, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, 'J', npc_bram, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, 'E', npc_calder, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        if(mason_spawned) {
+            int mx = 15 * TILE + TILE / 2, my = 5 * TILE + TILE / 2;
+            blit_sprite(npc_mason, NPC_SPRITE_W, NPC_SPRITE_H,
+                        mx - cam_x - NPC_SPRITE_W / 2, my - cam_y - NPC_SPRITE_H);
+        }
+    }
+    else if(map_id == MAP_FOREST) {
+        draw_npc(map_id, '1', npc_soldier, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, '2', npc_soldier, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        draw_npc(map_id, '3', npc_soldier, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+    }
+    else if(map_id == MAP_GROVE) {
+        draw_npc(map_id, '9', npc_shinigami, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        if(!cath_caught)
+            draw_npc(map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H, cam_x, cam_y);
+    }
+}
+
 /* Player sprite, bottom-center anchored at (cx, cy) same as the
    silhouette this replaces (draw.lua's draw.actor() used the same
    anchor). dir matches the sprite arrays below: 0=down,1=up,2=left,
    3=right. */
-static void draw_player(int cx, int cy, int dir) {
-    static const u16 *const frames[4] = {
-        max_down, max_up, max_left, max_right
-    };
+/* Walk-cycle animation, matching state.lua's G.panim/G.pframe: 4
+   frames per direction, stepping to the next one every 10 frames
+   while moving (dt*6 per frame at our fixed ~60fps vblank rate takes
+   10 frames to cross 1.0, same as the reference), frozen on frame 0
+   while standing still. main() drives anim_frame the same way
+   G.pframe is driven. */
+static const u16 *const MAX_FRAMES[4][4] = {
+    { max_down_1,  max_down_2,  max_down_3,  max_down_4 },
+    { max_up_1,    max_up_2,    max_up_3,    max_up_4 },
+    { max_left_1,  max_left_2,  max_left_3,  max_left_4 },
+    { max_right_1, max_right_2, max_right_3, max_right_4 },
+};
+
+static void draw_player(int cx, int cy, int dir, int anim_frame) {
     int x = cx - MAX_SPRITE_W / 2, y = cy - MAX_SPRITE_H;
-    blit_sprite(frames[dir], MAX_SPRITE_W, MAX_SPRITE_H, x, y);
+    blit_sprite(MAX_FRAMES[dir][anim_frame & 3], MAX_SPRITE_W, MAX_SPRITE_H, x, y);
 }
 
 /* ----------------------------------------------------------------------
@@ -1828,6 +1887,25 @@ static int try_encounter(int map_id, int px, int py, int party_n,
  * item/attack/guard menu with a ">" cursor, or the special-move timing
  * bar underneath.
  * ---------------------------------------------------------------------- */
+#define BATTLE_CONTENT_Y (MENU_Y + 56)
+
+/* Index order matches SP_QUILLPUP..SP_CRYMARE and gen_sprites.py's
+   MONSTERS list. No player-side battle sprite here (screen space):
+   the player's walk sprite is already constantly visible on the
+   world map, so the foe -- the thing battle screens actually need
+   art for -- gets the space instead. */
+static const u16 *const MONSTER_SPRITES[11] = {
+    monster_quillpup, monster_glimmoth, monster_tortcask, monster_razorbat,
+    monster_mossback, monster_briarfox, monster_fenwisp, monster_duskhorn,
+    monster_needleroot, monster_cathleen, monster_crymare,
+};
+
+static void draw_battle_foe_sprite(const Battle *b) {
+    int x = MENU_X + MENU_W - 8 - MONSTER_SPRITE_W;
+    int y = MENU_Y + 4;
+    blit_sprite(MONSTER_SPRITES[b->foe.species], MONSTER_SPRITE_W, MONSTER_SPRITE_H, x, y);
+}
+
 static void draw_battle_status(const Battle *b) {
     char buf[40];
     int n;
@@ -1891,7 +1969,7 @@ static int battle_item_menu_kind(const Bag *bag, int idx) {
    fillItemMenu's wild-battle branch (the trainer branch, plain
    "Capture Crystal xN", is dead code here -- b->wild is always 1). */
 static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
-    int y = MENU_Y + 32;
+    int y = BATTLE_CONTENT_Y;
     int i = 0;
     char buf[40];
     int n;
@@ -1934,7 +2012,7 @@ static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
 }
 
 static void draw_battle_atk_menu(const Battle *b, int cur) {
-    int y = MENU_Y + 32;
+    int y = BATTLE_CONTENT_Y;
     char buf[32];
     int n;
 
@@ -1952,14 +2030,14 @@ static void draw_battle_atk_menu(const Battle *b, int cur) {
 }
 
 static void draw_battle_guard_menu(int cur) {
-    int y = MENU_Y + 32;
+    int y = BATTLE_CONTENT_Y;
     draw_battle_menu_row("DODGE AGI", 0, cur, y); y += MENU_ROW_H;
     draw_battle_menu_row("BLOCK STR", 1, cur, y); y += MENU_ROW_H;
     draw_battle_menu_row("BARRIER SPC", 2, cur, y);
 }
 
 static void draw_battle_minigame(const Battle *b) {
-    int bar_x = MENU_X + 8, bar_y = MENU_Y + 40, bar_w = MENU_W - 16, bar_h = 10;
+    int bar_x = MENU_X + 8, bar_y = BATTLE_CONTENT_Y + 8, bar_w = MENU_W - 16, bar_h = 10;
     int needle_x = bar_x + (int)(b->mg * (float)bar_w / 100.0f);
 
     fill_rect(bar_x, bar_y, bar_w, bar_h, rgb565(40, 38, 32));
@@ -1977,10 +2055,11 @@ static void draw_battle(const Battle *b, const Bag *bag) {
                      b->phase == 2 ? "ATTACK" :
                      b->phase == 3 ? "GUARD" : "QUILLBURST");
     draw_battle_status(b);
+    draw_battle_foe_sprite(b);
 
     switch(b->phase) {
         case 0:
-            draw_wrapped(b->msg[b->msg_i], MENU_X + 8, MENU_Y + 32,
+            draw_wrapped(b->msg[b->msg_i], MENU_X + 8, BATTLE_CONTENT_Y,
                          rgb565(232, 228, 216), MENU_SCALE, MENU_W / 8 - 2, 9);
             break;
         case 1:
@@ -2195,6 +2274,7 @@ void main(void) {
     int prev_up = 0, prev_down = 0, prev_left = 0, prev_right = 0;
     int map_id = MAP_HOUSE;
     int px, py, pdir = 0; /* dir: 0=down,1=up,2=left,3=right */
+    int anim_counter = 0; /* see draw_player's comment */
     int col, row;
     int cam_x, cam_y;
     u16 raw;
@@ -2582,6 +2662,13 @@ void main(void) {
                 if(pressed(raw, CONT_DPAD_RIGHT)) { dx = 1;  pdir = 3; }
                 if(pressed(raw, CONT_DPAD_UP))    { dy = -1; pdir = 1; }
                 if(pressed(raw, CONT_DPAD_DOWN))  { dy = 1;  pdir = 0; }
+
+                if(dx == 0 && dy == 0) {
+                    anim_counter = 0;
+                }
+                else {
+                    anim_counter++;
+                }
 
                 if(dx != 0 || dy != 0) {
                     /* Axis-separated movement so the player slides
@@ -3121,7 +3208,8 @@ void main(void) {
             compute_camera(map_id, px, py, &cam_x, &cam_y);
             draw_map(map_id, cam_x, cam_y);
             draw_props(map_id, cam_x, cam_y);
-            draw_player(px - cam_x, py - cam_y, pdir);
+            draw_npcs(map_id, cam_x, cam_y, mason_spawned, cath_caught);
+            draw_player(px - cam_x, py - cam_y, pdir, anim_counter / 10);
             draw_hud(got_shelf, looted_crate, bag.bandage);
             if(seq_lines)
                 draw_dialogue_box(seq_lines[seq_beat]);
