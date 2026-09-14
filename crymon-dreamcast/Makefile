@@ -18,8 +18,13 @@ src/start.o: src/start.S
 src/main.o: src/main.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# -lgcc: compiler-support routines (integer divide, struct-copy) GCC
+# emits calls to but never inlines, even at -O2 on SH4 -- not part of
+# libc/newlib, so this doesn't pull in anything -nodefaultlibs is
+# meant to keep out. Needed starting with the battle system's integer
+# division and Monster struct copies.
 crymon.elf: $(OBJS) dc.ld
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS) -lgcc
 
 # Requires mkdcdisc (https://gitlab.com/simulant/mkdcdisc) on PATH.
 cdi: crymon.elf

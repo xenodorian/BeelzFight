@@ -1,16 +1,19 @@
 /*
- * CryMon - Dreamcast port, step 5: full world navigation. All 4 of
- * the reference's maps (HOUSE, VELD, FOREST, GROVE) now exist, with
- * camera scrolling for the three that are bigger than the screen, and
- * every door/warp tile between them works, matching state.lua's warp
- * chain (house<->veld<->forest<->grove) including the house door's
- * gate on gotShelf. Still not ported: any NPC, soldier, wild
- * encounter, the battle system, catching, the shop, or endings --
- * VELD/FOREST/GROVE are walkable but otherwise empty; their many
- * NPC/decoration tile marks (Q, K, M, V, X, J, T, 1-9, etc.) render
- * with paintTile's colors but have no actors or interactions behind
- * them yet. See the per-system notes further down for exactly what
- * each ported piece does and doesn't cover.
+ * CryMon - Dreamcast port, step 6: the battle system, wild encounters
+ * only. Walking onto a 'T' tile in VELD/FOREST now has the reference's
+ * 18% per-tile chance to start a real fight -- full item use, the
+ * basic/special/guard turn loop (including the special move's timing
+ * minigame), capture, XP/leveling, win/loss -- matching state.lua's
+ * updateBattle()/pickAtk()/pickGuard()/pickItem()/finishWin() and
+ * data.lua's captureChance()/mintMonster()/grantXp() formulas. The
+ * party is a real, capturable-up-to-6 roster now (Monster party[6]),
+ * not just a got_shelf flag. Still not ported: any NPC, soldier, the
+ * shop, or endings -- trainer battles (soldiers, Mason, Calder,
+ * Shinigami, Cathleen) and Cathleen's spellcaster kit all need NPCs
+ * that don't exist in this port yet, so wild encounters are the only
+ * way to fight. See the battle-system section comment further down
+ * for exactly what's in and out of scope, and the per-system notes
+ * below that for everything else ported so far.
  *
  * Bare-metal, no KallistiOS/BIOS calls. Video setup, vblank sync, and
  * the Maple controller driver are unchanged from step 1 (see that
@@ -304,6 +307,20 @@ static const uint8_t font_09[10][8] = {
               0b00000110, 0b00001100, 0b00111000, 0b00000000 },
 };
 
+/* '-', '+', '/', needed by the battle system's stat-mod and damage
+   messages ("STR+4", "FOE STR-3", "HP N/N") -- font_AZ/font_09 alone
+   can't render any of these. */
+static const uint8_t glyph_minus[8] = {
+    0, 0, 0, 0b00111100, 0, 0, 0, 0,
+};
+static const uint8_t glyph_plus[8] = {
+    0, 0b00011000, 0b00011000, 0b01111110, 0b00011000, 0b00011000, 0, 0,
+};
+static const uint8_t glyph_slash[8] = {
+    0b00000011, 0b00000110, 0b00001100, 0b00011000,
+    0b00110000, 0b01100000, 0b01000000, 0,
+};
+
 static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int scale) {
     int row, col, sx, sy;
 
@@ -329,6 +346,12 @@ static void draw_text_s(const char *s, int x, int y, u16 color, int scale) {
             draw_glyph(cx, y, font_AZ[*s - 'A'], color, scale);
         else if(*s >= '0' && *s <= '9')
             draw_glyph(cx, y, font_09[*s - '0'], color, scale);
+        else if(*s == '-')
+            draw_glyph(cx, y, glyph_minus, color, scale);
+        else if(*s == '+')
+            draw_glyph(cx, y, glyph_plus, color, scale);
+        else if(*s == '/')
+            draw_glyph(cx, y, glyph_slash, color, scale);
         cx += px;
     }
 }
@@ -909,6 +932,14 @@ static const char *const TALK_GROVE_LEAVE[] = {
     "BACK UNDER THE TREES",
 };
 
+/* state.lua's bAfter==7 loss handler: "Max" / "We still breathe. Crawl
+   back." shown as a plain world message once the battle itself has
+   already ended (matches say1(G, "Max", ...) running after G.mode is
+   set back to MODE.WORLD). */
+static const char *const TALK_LOSS[] = {
+    "WE STILL BREATHE CRAWL BACK",
+};
+
 #define TALK_LEN(arr) (int)(sizeof(arr) / sizeof((arr)[0]))
 
 #define DIALOGUE_MAX_CHARS 37
@@ -946,21 +977,145 @@ static void draw_hud(int got_shelf, int looted_crate, int bag_bandage) {
 }
 
 /* ----------------------------------------------------------------------
+ * Species/monster data and battle math, verbatim from data.lua's
+ * SPECIES table, mintMonster(), grantXp(), and captureChance(). Move
+ * names are upper-cased/depunctuated for our font; multi-word names
+ * keep their space ("FIRE BOLT"). Cathleen's spellcaster kit
+ * (castSpell -- Fire Bolt/Ice Beam/Lightning Strike/Mana Surge) isn't
+ * ported: she's only reachable as a Grove NPC battle, which isn't
+ * built yet (no NPCs exist in this port), so nothing can mint or
+ * fight a Cathleen yet. Her species entry is still here for table
+ * symmetry with data.lua and so mint_monster/grant_xp already work
+ * for her once that NPC exists.
+ * ---------------------------------------------------------------------- */
+typedef struct {
+    const char *name, *basic, *special;
+    int maxHp, str, agl, spc, spp;
+} Species;
+
+#define SP_QUILLPUP   0
+#define SP_GLIMMOTH   1
+#define SP_TORTCASK   2
+#define SP_RAZORBAT   3
+#define SP_MOSSBACK   4
+#define SP_BRIARFOX   5
+#define SP_FENWISP    6
+#define SP_DUSKHORN   7
+#define SP_NEEDLEROOT 8
+#define SP_CATHLEEN   9
+#define SP_CRYMARE    10
+
+static const Species SPECIES[11] = {
+    /* name          basic       special         maxHp str agl spc spp */
+    { "QUILLPUP",   "NIP",       "QUILLBURST",   34, 15, 10, 7,  3 },
+    { "GLIMMOTH",   "DUSTWING",  "LAMPFLARE",    26, 7,  13, 16, 3 },
+    { "TORTCASK",   "SHOVE",     "SHELLSLAM",    42, 13, 5,  8,  3 },
+    { "RAZORBAT",   "RAKE",      "SWOOPCUT",     30, 14, 16, 9,  3 },
+    { "MOSSBACK",   "SQUELCH",   "MOSSGUARD",    38, 12, 6,  11, 3 },
+    { "BRIARFOX",   "BRAMBLE",   "THORNRUSH",    28, 13, 17, 10, 3 },
+    { "FENWISP",    "GLIM",      "FENFLARE",     24, 8,  16, 17, 3 },
+    { "DUSKHORN",   "GORE",      "DUSKRAM",      36, 16, 8,  7,  3 },
+    { "NEEDLEROOT", "PRICK",     "SAPDRAIN",     32, 12, 7,  14, 3 },
+    { "CATHLEEN",   "FIRE BOLT", "MANA SURGE",   38, 11, 13, 19, 4 },
+    { "CRYMARE",    "WAIL",      "NIGHTBRIDLE",  30, 9,  14, 18, 3 },
+};
+
+typedef struct {
+    int species;
+    int lv, xp;
+    int maxHp, hp, str, agl, spc, spp, sppMax;
+} Monster;
+
+/* xorshift32, seeded from the frame counter at title-screen dismissal
+   (see main()) -- there's no RTC/libc rand() in this freestanding
+   build, so this stands in for math.random()/irand() throughout the
+   ported formulas below. Not cryptographic, just enough variance for
+   a homebrew game. */
+static u32 rng_state = 0x9e3779b9u;
+static u32 rng_next(void) {
+    rng_state ^= rng_state << 13;
+    rng_state ^= rng_state >> 17;
+    rng_state ^= rng_state << 5;
+    return rng_state;
+}
+static int irand(int a, int b) {
+    return a + (int)(rng_next() % (u32)(b - a + 1));
+}
+
+static int jground(float x) {
+    return (int)(x + 0.5f);
+}
+
+static int clampi(int v, int lo, int hi) {
+    if(v < lo) return lo;
+    if(v > hi) return hi;
+    return v;
+}
+
+static Monster mint_monster(int species, int lv) {
+    const Species *s = &SPECIES[species];
+    float g = 1.0f + (float)(lv - 3) * 0.12f;
+    Monster m;
+    m.species = species;
+    m.lv = lv < 1 ? 1 : lv;
+    m.xp = 0;
+    m.maxHp = jground((float)s->maxHp * g);
+    m.str = jground((float)s->str * g);
+    m.agl = jground((float)s->agl * g);
+    m.spc = jground((float)s->spc * g);
+    m.spp = s->spp;
+    m.sppMax = s->spp;
+    m.hp = m.maxHp;
+    return m;
+}
+
+/* data.grantXp: +6+4*foeLv xp per win, level up (+3 maxHp, +1 each
+   stat) while xp >= lv*10, capped at lv 12. Returns 1 if it leveled
+   up at least once. */
+static int grant_xp(Monster *m, int foe_lv) {
+    int grew = 0;
+    m->xp += 6 + foe_lv * 4;
+    while(m->xp >= m->lv * 10 && m->lv < 12) {
+        m->xp -= m->lv * 10;
+        m->lv++;
+        m->maxHp += 3;
+        m->hp += 3;
+        if(m->hp > m->maxHp) m->hp = m->maxHp;
+        m->str++;
+        m->agl++;
+        m->spc++;
+        grew = 1;
+    }
+    return grew;
+}
+
+/* data.captureChance: 5% per foe agility, +1% per % of foe HP
+   missing, +25% if any foe stat has been lowered this fight. */
+static int capture_chance(int agl, int hp, int max_hp, int vulnerable) {
+    int missing = max_hp > 0 ? (max_hp - hp) * 100 / max_hp : 0;
+    int chance = 5 * agl + missing;
+    if(vulnerable) chance += 25;
+    return clampi(chance, 0, 100);
+}
+
+/* ----------------------------------------------------------------------
  * Bag and party menus, ported from render.lua's drawBag()/drawParty().
- * Both are read-only overlays here (no item use, no lead-switching --
- * nothing in this room's scope needs either yet): open with Y (bag) or
- * START (party), close with B. data.lua's START_BAG gives the room's
- * starting counts (salve 2, bandage 2, bitterroot 1, dust 1, gem 0)
- * and START_MARKS (16); the bandage count is the only one this room
- * ever changes (the crate). Item icons (render.lua's "item-<id>"
- * sprites) aren't ported -- text rows only, like the rest of this
- * step's UI.
+ * Opened from the world with Y (bag) or START (party), closed with B;
+ * items are actually used from the battle system's own item menu
+ * (below), not from here -- these two screens stay read-only info
+ * views outside battle, matching state.lua's BAG/PARTY mode update
+ * (open/close only, no cursor/use logic there either). No
+ * lead-switching menu here since this port has no multi-monster
+ * roster to switch within (see Monster/party_mon). data.lua's
+ * START_BAG gives the starting counts (salve 2, bandage 2, bitterroot
+ * 1, dust 1, gem 0) and START_MARKS (16); both bag counts and marks
+ * are now real, mutable state once the battle system below uses/
+ * grants them. Item icons (render.lua's "item-<id>" sprites) aren't
+ * ported -- text rows only, like the rest of this port's UI.
  * ---------------------------------------------------------------------- */
 typedef struct {
     int salve, bandage, bitterroot, dust, gem;
 } Bag;
-
-#define MARKS_START 16
 
 #define MENU_X 20
 #define MENU_Y 20
@@ -987,7 +1142,7 @@ static void draw_bag_row(const char *label, int count, int y) {
     draw_text_s(buf, MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE);
 }
 
-static void draw_bag_menu(const Bag *bag) {
+static void draw_bag_menu(const Bag *bag, int marks) {
     int y = MENU_Y + 24;
     char marks_buf[16];
     int n;
@@ -995,7 +1150,7 @@ static void draw_bag_menu(const Bag *bag) {
     draw_menu_frame("BAG");
 
     n = s_cat(marks_buf, 0, "MARKS ");
-    n = s_cat_uint(marks_buf, n, MARKS_START);
+    n = s_cat_uint(marks_buf, n, marks);
     marks_buf[n] = 0;
     draw_text_s(marks_buf, MENU_X + MENU_W - 8 - text_width_s(marks_buf, MENU_SCALE),
                 MENU_Y + 8, rgb565(143, 74, 64), MENU_SCALE);
@@ -1007,32 +1162,614 @@ static void draw_bag_menu(const Bag *bag) {
     draw_bag_row("CAPTURE CRYSTAL", bag->gem, y);
 }
 
-/* Quillpup's stats at the level this room mints it (mintMonster's
-   growth curve: g = 1 + (lv-3)*0.12, so lv 3 gives g == 1 exactly --
-   maxHp = floor(34*1 + 0.5) = 34, matching data.lua's quillpup
-   species entry). No battle system exists yet to change hp from
-   maxHp, so it's shown here as always full. */
-#define QUILLPUP_LV     3
-#define QUILLPUP_MAX_HP 34
-
-static void draw_party_menu(int got_shelf) {
+/* has_party mirrors state.lua's #G.party > 0; party_mon is the one
+   party slot this port supports (no PARTY_MAX-6 roster, no switching
+   -- Quillpup is the only species obtainable so far). Shows real,
+   current HP now that the battle system tracks it. */
+static void draw_party_menu(int has_party, const Monster *party_mon) {
     int y = MENU_Y + 24;
 
     draw_menu_frame("CRYMON");
 
-    if(got_shelf) {
+    if(has_party) {
         char buf[40];
-        int n = s_cat(buf, 0, "> QUILLPUP LV");
-        n = s_cat_uint(buf, n, QUILLPUP_LV);
+        int n = s_cat(buf, 0, "> ");
+        n = s_cat(buf, n, SPECIES[party_mon->species].name);
+        n = s_cat(buf, n, " LV");
+        n = s_cat_uint(buf, n, party_mon->lv);
         n = s_cat(buf, n, " HP ");
-        n = s_cat_uint(buf, n, QUILLPUP_MAX_HP);
+        n = s_cat_uint(buf, n, party_mon->hp);
         n = s_cat(buf, n, "/");
-        n = s_cat_uint(buf, n, QUILLPUP_MAX_HP);
+        n = s_cat_uint(buf, n, party_mon->maxHp);
         buf[n] = 0;
         draw_text_s(buf, MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE);
     }
     else {
         draw_text_s("NO CRYMON YET", MENU_X + 8, y, rgb565(138, 134, 120), MENU_SCALE);
+    }
+}
+
+/* ----------------------------------------------------------------------
+ * Battle system, ported from state.lua's updateBattle()/pickAtk()/
+ * pickGuard()/pickItem()/applyHit()/finishWin() and captureChanceNow().
+ * Wild encounters only (tryEncounter()/startBattle() below): trainer
+ * battles (soldiers, Mason, Calder, Shinigami, Cathleen-as-foe) all
+ * need NPCs that don't exist in this port yet, so G.bWild is always
+ * true here and finishWin()'s trainer-specific branches (Calder ->
+ * ending, soldier/Mason/Shinigami marks-and-mode-change) are dead
+ * code for this milestone -- only the generic wild-win tail
+ * (marks+3, XP, return to world) is ported. Cathleen's spellcaster
+ * kit (castSpell) isn't ported for the same reason -- see the
+ * Species/Monster section above.
+ *
+ * One deliberate adaptation: state.lua's post-win "grew to lv N" /
+ * "stands over the grass" line is a timed-fade G.hud toast
+ * (note()/G.hudT), not a clickable message. This port has no
+ * timed-fade HUD, so it's shown as one extra battle-message beat
+ * (BAFTER_WIN_NOTE below) before returning to the world instead.
+ * ---------------------------------------------------------------------- */
+typedef struct {
+    Monster pl, foe;
+    int wild;
+    int phase;      /* 0 msg, 1 item menu, 2 attack menu, 3 guard menu,
+                        4 special-move timing minigame */
+    char msg[3][40];
+    int msg_n, msg_i;
+    int after;
+    int cur;        /* menu cursor for phases 1-3 */
+    int mods_self_str, mods_self_agl, mods_self_spc;
+    int mods_foe_str, mods_foe_agl, mods_foe_spc;
+    float mg;       /* special-move timing needle, 0-100 */
+    int mg_dir;
+    int dmg;
+    char label[28];
+    int grew;       /* set by finish_win() below, read by the WIN_NOTE beat */
+} Battle;
+
+#define BAFTER_ITEM      1
+#define BAFTER_ATK       2
+#define BAFTER_GUARD     3
+#define BAFTER_WIN       5
+#define BAFTER_WORLD     6
+#define BAFTER_LOSS      7
+#define BAFTER_WIN_NOTE  9
+
+/* selfDebuffed(G) (the mirror of this, used by Cathleen's foe-AI mana
+   surge override chance) isn't ported -- see the section comment on
+   why Cathleen's kit is out of scope here. */
+static int battle_foe_debuffed(const Battle *b) {
+    return b->mods_foe_str < 0 || b->mods_foe_agl < 0 || b->mods_foe_spc < 0;
+}
+static int battle_capture_chance(const Battle *b) {
+    return capture_chance(b->foe.agl, b->foe.hp, b->foe.maxHp, battle_foe_debuffed(b));
+}
+
+static void battle_apply_hit(Battle *b) {
+    int n;
+    b->foe.hp -= b->dmg;
+    if(b->foe.hp < 0) b->foe.hp = 0;
+
+    n = s_cat(b->msg[0], 0, b->label);
+    n = s_cat(b->msg[0], n, " ");
+    n = s_cat_uint(b->msg[0], n, b->dmg);
+    n = s_cat(b->msg[0], n, " DMG");
+    b->msg[0][n] = 0;
+
+    if(b->foe.hp <= 0) {
+        n = s_cat(b->msg[1], 0, SPECIES[b->foe.species].name);
+        n = s_cat(b->msg[1], n, " FALLS");
+        b->msg[1][n] = 0;
+        b->msg_n = 2; b->msg_i = 0; b->phase = 0; b->after = BAFTER_WIN;
+        return;
+    }
+
+    n = s_cat(b->msg[1], 0, "FOE ANSWERS CHOOSE A GUARD");
+    b->msg[1][n] = 0;
+    b->msg_n = 2; b->msg_i = 0; b->phase = 0; b->after = BAFTER_GUARD;
+}
+
+/* pickAtk's basic-move branch (Cathleen's spell branch isn't ported --
+   see the section comment above). */
+static void battle_pick_basic(Battle *b) {
+    int atk = b->pl.str + b->mods_self_str;
+    int def = b->foe.str + b->mods_foe_str;
+    int n = 0;
+
+    b->dmg = jground(6.0f + (float)atk * 0.62f - (float)def * 0.16f + (float)irand(0, 3));
+    if(b->dmg < 1) b->dmg = 1;
+    n = s_cat(b->label, n, SPECIES[b->pl.species].basic);
+    b->label[n] = 0;
+    battle_apply_hit(b);
+}
+
+/* pickAtk's special-move branch: engine.ts's timing minigame (mg
+   bounces 0-100; landing 46-54 is "perfect" 2x, 38-62 "connected"
+   1.45x, else "fizzled" 0.7x). Called once on A-press during phase 4
+   (see main()'s battle update). */
+static void battle_pick_special(Battle *b) {
+    float mul;
+    const char *tag;
+    int def = b->foe.spc + b->mods_foe_spc;
+    int n = 0;
+
+    if(b->mg >= 46.0f && b->mg <= 54.0f)      { mul = 2.0f;  tag = "PERFECT"; }
+    else if(b->mg >= 38.0f && b->mg <= 62.0f) { mul = 1.45f; tag = "CONNECTED"; }
+    else                                      { mul = 0.7f;  tag = "FIZZLED"; }
+
+    /* atk uses modsSelfStr, not modsSelfSpc -- verbatim from
+       state.lua's pickAtk: "local atk = G.bPl.spc + G.modsSelfStr * 0.2". */
+    b->dmg = jground((11.0f + ((float)b->pl.spc + (float)b->mods_self_str * 0.2f) * 0.75f
+                       - (float)def * 0.18f) * mul + (float)irand(0, 2));
+    if(b->dmg < 1) b->dmg = 1;
+
+    n = s_cat(b->label, n, SPECIES[b->pl.species].special);
+    n = s_cat(b->label, n, " ");
+    n = s_cat(b->label, n, tag);
+    b->label[n] = 0;
+    battle_apply_hit(b);
+}
+
+/* pickGuard(): the foe picks its own move (28% chance of its special
+   if it has spp left, otherwise basic), the player's chosen guard is
+   checked against a stat-difference success chance, and damage scales
+   per guard kind on success. kind: 0 dodge (AGI), 1 block (STR), 2
+   barrier (SPC). Needs the live party array to resolve a faint the
+   same way state.lua does inline: swap in the next living member if
+   one exists (message becomes "<line>" + "<name> JUMPS IN", battle
+   continues at the item menu) or end the battle if none do ("<line>"
+   + "<name> CANNOT STAND", BAFTER_LOSS). */
+static void battle_pick_guard(Battle *b, int kind, Monster *party, int party_n, int *lead) {
+    const Species *foe_sp = &SPECIES[b->foe.species];
+    int use_special = b->foe.spp > 0 && irand(0, 99) < 28;
+    const char *move_name;
+    float base;
+    int atk_stat, def_stat, chance, success, dmg;
+    char line[40];
+    int n = 0;
+
+    if(use_special) b->foe.spp--;
+    move_name = use_special ? foe_sp->special : foe_sp->basic;
+
+    if(use_special) {
+        atk_stat = b->foe.spc + b->mods_foe_spc;
+        base = 10.0f + (float)(b->foe.spc + b->mods_foe_spc) * 0.7f
+                     - (float)(b->pl.spc + b->mods_self_spc) * 0.12f;
+    }
+    else {
+        atk_stat = b->foe.str + b->mods_foe_str;
+        base = 6.0f + (float)(b->foe.str + b->mods_foe_str) * 0.6f
+                    - (float)(b->pl.str + b->mods_self_str) * 0.15f;
+    }
+
+    if(kind == 0)      def_stat = b->pl.agl + b->mods_self_agl;
+    else if(kind == 1) def_stat = b->pl.str + b->mods_self_str;
+    else               def_stat = b->pl.spc + b->mods_self_spc;
+
+    chance = clampi(50 + (def_stat - atk_stat) * 5 + irand(-10, 10), 12, 88);
+    success = irand(1, 100) <= chance;
+    dmg = jground(base + (float)irand(0, 3));
+    if(dmg < 1) dmg = 1;
+
+    if(kind == 0) {
+        if(success) {
+            dmg = 0;
+            n = s_cat(line, 0, SPECIES[b->pl.species].name);
+            n = s_cat(line, n, " SLIPS ASIDE");
+        }
+        else {
+            n = s_cat(line, 0, "THE DODGE FAILS ");
+            n = s_cat_uint(line, n, dmg);
+            n = s_cat(line, n, " DMG");
+        }
+    }
+    else if(kind == 1) {
+        if(success) {
+            dmg = jground((float)dmg * 0.5f);
+            if(dmg < 1) dmg = 1;
+            n = s_cat(line, 0, "BLOCKED ");
+            n = s_cat_uint(line, n, dmg);
+            n = s_cat(line, n, " DMG LEAKS THROUGH");
+        }
+        else {
+            n = s_cat(line, 0, "THE BLOCK BREAKS ");
+            n = s_cat_uint(line, n, dmg);
+            n = s_cat(line, n, " DMG");
+        }
+    }
+    else {
+        if(success) {
+            dmg = jground((float)dmg * 0.4f);
+            if(dmg < 1) dmg = 1;
+            n = s_cat(line, 0, "A THIN BARRIER HOLDS ");
+            n = s_cat_uint(line, n, dmg);
+            n = s_cat(line, n, " DMG");
+        }
+        else {
+            n = s_cat(line, 0, "THE BARRIER SHIVERS APART ");
+            n = s_cat_uint(line, n, dmg);
+            n = s_cat(line, n, " DMG");
+        }
+    }
+    line[n] = 0;
+
+    b->pl.hp -= dmg;
+    if(b->pl.hp < 0) b->pl.hp = 0;
+    party[*lead] = b->pl;
+
+    if(b->pl.hp <= 0) {
+        int i, nxt = -1;
+        for(i = 0; i < party_n; i++)
+            if(i != *lead && party[i].hp > 0) { nxt = i; break; }
+
+        n = s_cat(b->msg[0], 0, line);
+        b->msg[0][n] = 0;
+
+        if(nxt >= 0) {
+            *lead = nxt;
+            b->pl = party[nxt];
+            n = s_cat(b->msg[1], 0, SPECIES[b->pl.species].name);
+            n = s_cat(b->msg[1], n, " JUMPS IN");
+            b->msg[1][n] = 0;
+            b->msg_n = 2; b->msg_i = 0; b->phase = 0; b->after = BAFTER_ITEM;
+        }
+        else {
+            n = s_cat(b->msg[1], 0, SPECIES[b->pl.species].name);
+            n = s_cat(b->msg[1], n, " CANNOT STAND");
+            b->msg[1][n] = 0;
+            b->msg_n = 2; b->msg_i = 0; b->phase = 0; b->after = BAFTER_LOSS;
+        }
+        return;
+    }
+
+    n = s_cat(b->msg[0], 0, SPECIES[b->foe.species].name);
+    n = s_cat(b->msg[0], n, " USES ");
+    n = s_cat(b->msg[0], n, move_name);
+    b->msg[0][n] = 0;
+    n = s_cat(b->msg[1], 0, line);
+    b->msg[1][n] = 0;
+    b->msg_n = 2; b->msg_i = 0; b->phase = 0; b->after = BAFTER_ITEM;
+}
+
+/* Item menu kinds, matching fillItemMenu's row order (state.lua's
+   "switch" row is skipped -- see the item-menu drawing/input code in
+   main() for why). */
+#define ITEM_PASS       0
+#define ITEM_SALVE      1
+#define ITEM_BANDAGE    2
+#define ITEM_BITTERROOT 3
+#define ITEM_DUST       4
+#define ITEM_GEM        5
+
+/* pickItem(): items (heal/buff/debuff) are "free" -- they route back
+   to the attack menu (BAFTER_ATK), never to the guard phase, matching
+   state.lua exactly (only an actual attack or Wait lets the foe act).
+   A successful capture ends the battle outright (BAFTER_WORLD); every
+   other outcome, including a failed capture, also returns to the
+   attack menu. party/party_n are only touched by a successful
+   capture. */
+static void battle_pick_item(Battle *b, Bag *bag, int kind,
+                              Monster *party, int *party_n, int lead) {
+    int n = 0;
+
+    if(kind == ITEM_PASS) {
+        b->phase = 2;
+        b->cur = 0;
+        return;
+    }
+
+    if(kind == ITEM_SALVE && bag->salve > 0) {
+        int heal = b->pl.maxHp - b->pl.hp;
+        if(heal > 22) heal = 22;
+        bag->salve--;
+        b->pl.hp += heal;
+        n = s_cat(b->msg[0], 0, "MOSS SALVE ");
+        n = s_cat_uint(b->msg[0], n, heal);
+        n = s_cat(b->msg[0], n, " HP");
+    }
+    else if(kind == ITEM_BANDAGE && bag->bandage > 0) {
+        int heal = b->pl.maxHp - b->pl.hp;
+        if(heal > 12) heal = 12;
+        bag->bandage--;
+        b->pl.hp += heal;
+        n = s_cat(b->msg[0], 0, "LINEN WRAP ");
+        n = s_cat_uint(b->msg[0], n, heal);
+        n = s_cat(b->msg[0], n, " HP");
+    }
+    else if(kind == ITEM_BITTERROOT && bag->bitterroot > 0) {
+        bag->bitterroot--;
+        b->mods_self_str += 4;
+        n = s_cat(b->msg[0], 0, "BITTERROOT STR+4 THIS FIGHT");
+    }
+    else if(kind == ITEM_DUST && bag->dust > 0) {
+        bag->dust--;
+        b->mods_foe_str -= 3;
+        b->mods_foe_agl -= 2;
+        b->mods_foe_spc -= 2;
+        n = s_cat(b->msg[0], 0, "ASH DUST FOE STR-3 AGI-2 SPC-2");
+    }
+    else if(kind == ITEM_GEM && bag->gem > 0) {
+        bag->gem--;
+        if(!b->wild) {
+            bag->gem++;
+            n = s_cat(b->msg[0], 0, "CRYSTALS WILL NOT TAKE A TAMERS CRYMON");
+        }
+        else if(*party_n >= 6) {
+            bag->gem++;
+            n = s_cat(b->msg[0], 0, "SIX IS ALL MAX CAN HOLD");
+        }
+        else {
+            int chance = battle_capture_chance(b);
+            if(irand(1, 100) <= chance) {
+                Monster c = b->foe;
+                c.hp = c.maxHp * 2 / 5;
+                if(c.hp < 1) c.hp = 1;
+                party[*party_n] = c;
+                (*party_n)++;
+                n = s_cat(b->msg[0], 0, "THE CRYSTAL TAKES ");
+                n = s_cat(b->msg[0], n, SPECIES[c.species].name);
+                n = s_cat(b->msg[0], n, " IS YOURS");
+                b->msg[0][n] = 0;
+                b->msg_n = 1; b->msg_i = 0; b->phase = 0; b->after = BAFTER_WORLD;
+                party[lead] = b->pl;
+                return;
+            }
+            n = s_cat(b->msg[0], 0, "THE CRYSTAL CRACKS DARK IT SLIPS FREE");
+        }
+    }
+    else {
+        n = s_cat(b->msg[0], 0, "NOTHING HAPPENS");
+    }
+
+    b->msg[0][n] = 0;
+    b->msg_n = 1; b->msg_i = 0; b->phase = 0; b->after = BAFTER_ATK;
+    party[lead] = b->pl;
+}
+
+/* finishWin()'s generic wild-win tail (the trainer-specific branches
+   above it in state.lua all need NPCs this port doesn't have yet --
+   see the section comment). Grants XP to the party lead and marks+3;
+   the grow/no-grow note is queued by the caller as a WIN_NOTE beat
+   rather than shown here (see the section comment on why). */
+static void battle_finish_win(Battle *b, Monster *party, int lead, int *marks) {
+    b->grew = grant_xp(&party[lead], b->foe.lv);
+    b->pl = party[lead];
+    *marks += 3;
+}
+
+/* tryEncounter(): checked once per tile the player steps onto (not
+   every frame -- last_tx/last_ty track the last checked tile, exactly
+   like G.lastTx/G.lastTy). Only 'T' tiles trigger, at an 18% chance
+   (irand(0,99) < 18, not <= -- data.ts's exact 18-of-100 trigger set),
+   gated by a 3-frame cooldown (enc_lock) after each check. Species
+   pool/level range matches state.lua exactly; the reference's
+   "if MAP_FOREST ... else (implicitly VELD)" is safe to mirror as
+   written because HOUSE and GROVE have no 'T' tiles at all (checked
+   against the map data above), so the else branch only ever runs for
+   VELD in practice. Does nothing if the party is empty (leader(G) ==
+   nil guard in startBattle). On a trigger, fills *out (except pl,
+   which the caller sets from party[lead]) and returns 1. */
+static int try_encounter(int map_id, int px, int py, int party_n,
+                          int *enc_lock, int *last_tx, int *last_ty,
+                          Battle *out) {
+    static const int forest_pool[3] = { SP_FENWISP, SP_DUSKHORN, SP_NEEDLEROOT };
+    int tx = px / TILE, ty = py / TILE;
+    int id, lv, n;
+
+    if(tx == *last_tx && ty == *last_ty) return 0;
+    *last_tx = tx;
+    *last_ty = ty;
+    if(tile_at(map_id, tx, ty) != 'T') return 0;
+    if(*enc_lock > 0) { (*enc_lock)--; return 0; }
+    if(irand(0, 99) >= 18) return 0;
+    if(party_n <= 0) return 0;
+
+    *enc_lock = 3;
+
+    if(map_id == MAP_FOREST) {
+        id = forest_pool[irand(0, 2)];
+        lv = 3 + irand(0, 2);
+    }
+    else {
+        if(tx < 12) id = SP_GLIMMOTH;
+        else if(tx > 18) id = SP_TORTCASK;
+        else id = irand(0, 1) == 0 ? SP_GLIMMOTH : SP_TORTCASK;
+        lv = 2 + (ty > 14 ? 1 : 0) + irand(0, 1);
+    }
+
+    out->foe = mint_monster(id, lv);
+    out->wild = 1;
+    out->phase = 0;
+    n = s_cat(out->msg[0], 0, "A WILD ");
+    n = s_cat(out->msg[0], n, SPECIES[id].name);
+    out->msg[0][n] = 0;
+    out->msg_n = 1;
+    out->msg_i = 0;
+    out->after = BAFTER_ITEM;
+    out->cur = 0;
+    out->mods_self_str = out->mods_self_agl = out->mods_self_spc = 0;
+    out->mods_foe_str = out->mods_foe_agl = out->mods_foe_spc = 0;
+    out->mg = 8.0f;
+    out->mg_dir = 1;
+    out->grew = 0;
+    return 1;
+}
+
+/* ----------------------------------------------------------------------
+ * Battle drawing: one full-screen panel (draw_menu_frame's style)
+ * whose content depends on b->phase -- a status header (both HP bars)
+ * stays up throughout, with either the current message, or the
+ * item/attack/guard menu with a ">" cursor, or the special-move timing
+ * bar underneath.
+ * ---------------------------------------------------------------------- */
+static void draw_battle_status(const Battle *b) {
+    char buf[40];
+    int n;
+
+    n = s_cat(buf, 0, SPECIES[b->foe.species].name);
+    n = s_cat(buf, n, " LV");
+    n = s_cat_uint(buf, n, b->foe.lv);
+    n = s_cat(buf, n, " HP ");
+    n = s_cat_uint(buf, n, b->foe.hp);
+    n = s_cat(buf, n, "/");
+    n = s_cat_uint(buf, n, b->foe.maxHp);
+    buf[n] = 0;
+    draw_text_s(buf, MENU_X + 8, MENU_Y + 8, rgb565(197, 206, 198), MENU_SCALE);
+
+    n = s_cat(buf, 0, SPECIES[b->pl.species].name);
+    n = s_cat(buf, n, " LV");
+    n = s_cat_uint(buf, n, b->pl.lv);
+    n = s_cat(buf, n, " HP ");
+    n = s_cat_uint(buf, n, b->pl.hp);
+    n = s_cat(buf, n, "/");
+    n = s_cat_uint(buf, n, b->pl.maxHp);
+    buf[n] = 0;
+    draw_text_s(buf, MENU_X + 8, MENU_Y + 8 + MENU_ROW_H, rgb565(232, 228, 216), MENU_SCALE);
+}
+
+static void draw_battle_menu_row(const char *label, int idx, int cur, int y) {
+    u16 color = (idx == cur) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
+    draw_text_s(idx == cur ? ">" : " ", MENU_X + 8, y, color, MENU_SCALE);
+    draw_text_s(label, MENU_X + 16, y, color, MENU_SCALE);
+}
+
+/* Row count/kind-at-cursor for the item menu, kept in exact lockstep
+   with draw_battle_item_menu's own conditional row order below (both
+   walk PASS, salve, bandage, bitterroot, dust, gem in that order,
+   skipping any the bag is empty of). Used by main()'s input handling,
+   which needs the mapping without actually drawing. */
+static int battle_item_menu_count(const Bag *bag) {
+    int n = 1; /* PASS always present */
+    if(bag->salve > 0) n++;
+    if(bag->bandage > 0) n++;
+    if(bag->bitterroot > 0) n++;
+    if(bag->dust > 0) n++;
+    if(bag->gem > 0) n++;
+    return n;
+}
+
+static int battle_item_menu_kind(const Bag *bag, int idx) {
+    int i = 0;
+    if(idx == i++) return ITEM_PASS;
+    if(bag->salve > 0)      { if(idx == i++) return ITEM_SALVE; }
+    if(bag->bandage > 0)    { if(idx == i++) return ITEM_BANDAGE; }
+    if(bag->bitterroot > 0) { if(idx == i++) return ITEM_BITTERROOT; }
+    if(bag->dust > 0)       { if(idx == i++) return ITEM_DUST; }
+    if(bag->gem > 0)        { if(idx == i++) return ITEM_GEM; }
+    return ITEM_PASS; /* unreachable: idx is always < battle_item_menu_count() */
+}
+
+/* fillItemMenu, minus the "switch" row (this port's party has no
+   manual-switch UI -- see the item-menu comment in main()). Capture
+   Crystal's label includes the live capture chance, matching
+   fillItemMenu's wild-battle branch (the trainer branch, plain
+   "Capture Crystal xN", is dead code here -- b->wild is always 1). */
+static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
+    int y = MENU_Y + 32;
+    int i = 0;
+    char buf[40];
+    int n;
+
+    draw_battle_menu_row("PASS", i++, cur, y); y += MENU_ROW_H;
+
+    if(bag->salve > 0) {
+        n = s_cat(buf, 0, "MOSS SALVE UP TO 22 HP X");
+        n = s_cat_uint(buf, n, bag->salve);
+        buf[n] = 0;
+        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
+    }
+    if(bag->bandage > 0) {
+        n = s_cat(buf, 0, "LINEN WRAP UP TO 12 HP X");
+        n = s_cat_uint(buf, n, bag->bandage);
+        buf[n] = 0;
+        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
+    }
+    if(bag->bitterroot > 0) {
+        n = s_cat(buf, 0, "BITTERROOT STR+4 X");
+        n = s_cat_uint(buf, n, bag->bitterroot);
+        buf[n] = 0;
+        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
+    }
+    if(bag->dust > 0) {
+        n = s_cat(buf, 0, "ASH DUST STR-3 AGI-2 SPC-2 X");
+        n = s_cat_uint(buf, n, bag->dust);
+        buf[n] = 0;
+        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
+    }
+    if(bag->gem > 0) {
+        n = s_cat(buf, 0, "CAPTURE CRYSTAL ");
+        n = s_cat_uint(buf, n, battle_capture_chance(b));
+        n = s_cat(buf, n, " PCT X");
+        n = s_cat_uint(buf, n, bag->gem);
+        buf[n] = 0;
+        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
+    }
+    return i; /* row count, for input handling to map kinds <-> cursor */
+}
+
+static void draw_battle_atk_menu(const Battle *b, int cur) {
+    int y = MENU_Y + 32;
+    char buf[32];
+    int n;
+
+    draw_battle_menu_row(SPECIES[b->pl.species].basic, 0, cur, y); y += MENU_ROW_H;
+
+    n = s_cat(buf, 0, SPECIES[b->pl.species].special);
+    n = s_cat(buf, n, " ");
+    n = s_cat_uint(buf, n, b->pl.spp);
+    n = s_cat(buf, n, "/");
+    n = s_cat_uint(buf, n, b->pl.sppMax);
+    buf[n] = 0;
+    draw_battle_menu_row(buf, 1, cur, y); y += MENU_ROW_H;
+
+    draw_battle_menu_row("WAIT", 2, cur, y);
+}
+
+static void draw_battle_guard_menu(int cur) {
+    int y = MENU_Y + 32;
+    draw_battle_menu_row("DODGE AGI", 0, cur, y); y += MENU_ROW_H;
+    draw_battle_menu_row("BLOCK STR", 1, cur, y); y += MENU_ROW_H;
+    draw_battle_menu_row("BARRIER SPC", 2, cur, y);
+}
+
+static void draw_battle_minigame(const Battle *b) {
+    int bar_x = MENU_X + 8, bar_y = MENU_Y + 40, bar_w = MENU_W - 16, bar_h = 10;
+    int needle_x = bar_x + (int)(b->mg * (float)bar_w / 100.0f);
+
+    fill_rect(bar_x, bar_y, bar_w, bar_h, rgb565(40, 38, 32));
+    fill_rect(bar_x + (int)(0.38f * (float)bar_w), bar_y,
+              (int)(0.24f * (float)bar_w), bar_h, rgb565(90, 122, 82));
+    fill_rect(bar_x + (int)(0.46f * (float)bar_w), bar_y,
+              (int)(0.08f * (float)bar_w), bar_h, rgb565(197, 206, 198));
+    fill_rect(needle_x - 1, bar_y - 4, 2, bar_h + 8, 0xFFFF);
+    draw_text_s("A TO STRIKE", MENU_X + 8, bar_y + bar_h + 8, rgb565(138, 134, 120), MENU_SCALE);
+}
+
+static void draw_battle(const Battle *b, const Bag *bag) {
+    draw_menu_frame(b->phase == 0 ? "BATTLE" :
+                     b->phase == 1 ? "ITEM" :
+                     b->phase == 2 ? "ATTACK" :
+                     b->phase == 3 ? "GUARD" : "QUILLBURST");
+    draw_battle_status(b);
+
+    switch(b->phase) {
+        case 0:
+            draw_wrapped(b->msg[b->msg_i], MENU_X + 8, MENU_Y + 32,
+                         rgb565(232, 228, 216), MENU_SCALE, MENU_W / 8 - 2, 9);
+            break;
+        case 1:
+            draw_battle_item_menu(b, bag, b->cur);
+            break;
+        case 2:
+            draw_battle_atk_menu(b, b->cur);
+            break;
+        case 3:
+            draw_battle_guard_menu(b->cur);
+            break;
+        case 4:
+            draw_battle_minigame(b);
+            break;
+        default:
+            break;
     }
 }
 
@@ -1078,13 +1815,15 @@ static void do_warp(int *map_id, int *px, int *py, int *pdir,
 
 void main(void) {
     int state = 0; /* 0 = title screen, 1 = starting room */
+    u32 frame_count = 0;
     int prev_start = 0, prev_a = 0, prev_b = 0, prev_y = 0;
+    int prev_up = 0, prev_down = 0;
     int map_id = MAP_HOUSE;
     int px, py, pdir = 0; /* dir: 0=down,1=up,2=left,3=right */
     int col, row;
     int cam_x, cam_y;
     u16 raw;
-    int start_now, a_now, b_now, y_now;
+    int start_now, a_now, b_now, y_now, up_now, down_now;
 
     /* Frames left before a door tile can trigger another warp,
        matching state.lua's G.doorLock (set to 20 on spawn/warp,
@@ -1092,14 +1831,28 @@ void main(void) {
     int door_lock = 0;
 
     /* Room state, matching state.lua's G.gotShelf / G.lootedCrate /
-       G.bag (data.START_BAG). No HP/SP system exists yet, so the
-       bed's "full heal" (state.lua's fullHeal()) has nothing to do
-       here beyond showing its dialogue; no battle/party system
-       exists yet either, so Quillpup is tracked only as the
-       got_shelf flag plus the HUD/party-menu lines, not as a real
-       party member. */
+       G.bag (data.START_BAG) / G.marks (data.START_MARKS). No HP/SP
+       system existed until this step; the bed's "full heal"
+       (state.lua's fullHeal()) still has nothing to do here beyond
+       showing its dialogue, since it's a full-party heal and this
+       port's only source of a party member is the shelf. */
     int got_shelf = 0, looted_crate = 0;
     Bag bag = { 2, 2, 1, 1, 0 }; /* salve, bandage, bitterroot, dust, gem */
+    int marks = 16;
+
+    /* G.party, capped at data.PARTY_MAX (6); this port's only ways to
+       grow it are the shelf's starter grant and a battle capture --
+       no NPC gifts, no other starters. lead mirrors G.lead (0-based
+       here). */
+    Monster party[6];
+    int party_n = 0, lead = 0;
+
+    /* In-battle state (see the Battle section above); in_battle == 0
+       means the world is showing normally. enc_lock/last_tx/last_ty
+       are tryEncounter()'s G.encLock/G.lastTx/G.lastTy. */
+    int in_battle = 0;
+    Battle battle;
+    int enc_lock = 8, last_tx = -1, last_ty = -1;
 
     /* 0 = no menu, 1 = bag, 2 = party. Opened from the world with Y /
        START (state.lua's selectPressed()/startPressed() -- there's no
@@ -1132,16 +1885,25 @@ void main(void) {
     for(;;) {
         wait_vblank();
         fb_flip();
+        frame_count++;
 
         raw = maple_poll_buttons();
         start_now = pressed(raw, CONT_START);
         a_now     = pressed(raw, CONT_A);
         b_now     = pressed(raw, CONT_B);
         y_now     = pressed(raw, CONT_Y);
+        up_now    = pressed(raw, CONT_DPAD_UP);
+        down_now  = pressed(raw, CONT_DPAD_DOWN);
 
         if(state == 0) {
-            if(start_now && !prev_start)
+            if(start_now && !prev_start) {
                 state = 1;
+                /* Seeds the battle RNG from however many vblanks
+                   passed while the player sat at the title screen --
+                   see rng_next()'s comment for why this stands in for
+                   a real RTC/rand() source. */
+                rng_state ^= frame_count | 1u;
+            }
         }
         else if(menu_mode) {
             /* state.lua's MODE.BAG/MODE.PARTY update: only closing is
@@ -1149,6 +1911,129 @@ void main(void) {
                logic in this port's scope). */
             if((b_now && !prev_b) || (start_now && !prev_start))
                 menu_mode = 0;
+        }
+        else if(in_battle) {
+            /* updateBattle(), matching state.lua's bPhase dispatch:
+               0 = message (A advances; past the last beat, bAfter
+               says what's next), 4 = special-move timing minigame
+               (A locks it in), else = a menu (dpad nav, A confirms;
+               B backs out of the attack menu to the item menu, only
+               there). */
+            if(battle.phase == 0) {
+                if(a_now && !prev_a) {
+                    battle.msg_i++;
+                    if(battle.msg_i >= battle.msg_n) {
+                        switch(battle.after) {
+                            case BAFTER_ITEM:  battle.phase = 1; battle.cur = 0; break;
+                            case BAFTER_ATK:   battle.phase = 2; battle.cur = 0; break;
+                            case BAFTER_GUARD: battle.phase = 3; battle.cur = 0; break;
+                            case BAFTER_WIN: {
+                                int n;
+                                battle_finish_win(&battle, party, lead, &marks);
+                                n = s_cat(battle.msg[0], 0, SPECIES[party[lead].species].name);
+                                if(battle.grew) {
+                                    n = s_cat(battle.msg[0], n, " GREW TO LV");
+                                    n = s_cat_uint(battle.msg[0], n, party[lead].lv);
+                                }
+                                else {
+                                    n = s_cat(battle.msg[0], n, " STANDS OVER THE GRASS");
+                                }
+                                battle.msg[0][n] = 0;
+                                battle.msg_n = 1;
+                                battle.msg_i = 0;
+                                battle.phase = 0;
+                                battle.after = BAFTER_WIN_NOTE;
+                                break;
+                            }
+                            case BAFTER_WIN_NOTE:
+                            case BAFTER_WORLD:
+                                in_battle = 0;
+                                enc_lock = 3;
+                                break;
+                            case BAFTER_LOSS: {
+                                int revived = party[lead].maxHp * 2 / 5;
+                                if(revived < 1) revived = 1;
+                                party[lead].hp = revived;
+                                in_battle = 0;
+                                enc_lock = 3;
+                                seq_lines = TALK_LOSS;
+                                seq_len = TALK_LEN(TALK_LOSS);
+                                seq_beat = 0;
+                                break;
+                            }
+                            default:
+                                break;
+                        }
+                    }
+                }
+            }
+            else if(battle.phase == 4) {
+                /* mg bounces 0-100 at ~110 units/sec, matching
+                   engine.ts's per-frame update at our fixed ~60fps
+                   vblank rate (no real dt in this bare-metal loop). */
+                battle.mg += (float)battle.mg_dir * (110.0f / 60.0f);
+                if(battle.mg > 100.0f) { battle.mg = 100.0f; battle.mg_dir = -1; }
+                if(battle.mg < 0.0f)   { battle.mg = 0.0f;    battle.mg_dir = 1; }
+                if(a_now && !prev_a) {
+                    battle_pick_special(&battle);
+                    party[lead] = battle.pl;
+                }
+            }
+            else {
+                int n_rows = (battle.phase == 1) ? battle_item_menu_count(&bag) : 3;
+
+                if(up_now && !prev_up)
+                    battle.cur = (battle.cur - 1 + n_rows) % n_rows;
+                if(down_now && !prev_down)
+                    battle.cur = (battle.cur + 1) % n_rows;
+
+                if(battle.phase == 2 && b_now && !prev_b) {
+                    battle.phase = 1;
+                    battle.cur = 0;
+                }
+
+                if(a_now && !prev_a) {
+                    if(battle.phase == 1) {
+                        int kind = battle_item_menu_kind(&bag, battle.cur);
+                        battle_pick_item(&battle, &bag, kind, party, &party_n, lead);
+                    }
+                    else if(battle.phase == 2) {
+                        if(battle.cur == 0) {
+                            battle_pick_basic(&battle);
+                            party[lead] = battle.pl;
+                        }
+                        else if(battle.cur == 1) {
+                            if(battle.pl.spp <= 0) {
+                                int n = s_cat(battle.msg[0], 0, SPECIES[battle.pl.species].special);
+                                n = s_cat(battle.msg[0], n, " IS SPENT");
+                                battle.msg[0][n] = 0;
+                                battle.msg_n = 1;
+                                battle.msg_i = 0;
+                                battle.phase = 0;
+                                battle.after = BAFTER_ATK;
+                            }
+                            else {
+                                battle.pl.spp--;
+                                party[lead] = battle.pl;
+                                battle.mg = 8.0f;
+                                battle.mg_dir = 1;
+                                battle.phase = 4;
+                            }
+                        }
+                        else {
+                            int n = s_cat(battle.msg[0], 0, "MAX HOLDS");
+                            battle.msg[0][n] = 0;
+                            battle.msg_n = 1;
+                            battle.msg_i = 0;
+                            battle.phase = 0;
+                            battle.after = BAFTER_GUARD;
+                        }
+                    }
+                    else {
+                        battle_pick_guard(&battle, battle.cur, party, party_n, &lead);
+                    }
+                }
+            }
         }
         else {
             /* Movement is frozen while a dialogue sequence is active,
@@ -1192,6 +2077,12 @@ void main(void) {
                     if(px > map_w - 8) px = map_w - 8;
                     if(py < 8) py = 8;
                     if(py > map_h - 4) py = map_h - 4;
+
+                    if(try_encounter(map_id, px, py, party_n, &enc_lock,
+                                      &last_tx, &last_ty, &battle)) {
+                        battle.pl = party[lead];
+                        in_battle = 1;
+                    }
                 }
 
                 /* Door/warp tiles, matching state.lua's chain of
@@ -1304,6 +2195,9 @@ void main(void) {
                         case 'S':
                             if(!got_shelf) {
                                 got_shelf = 1;
+                                party[0] = mint_monster(SP_QUILLPUP, 3);
+                                party_n = 1;
+                                lead = 0;
                                 seq_lines = TALK_SHELF;
                                 seq_len = TALK_LEN(TALK_SHELF);
                             }
@@ -1358,14 +2252,18 @@ void main(void) {
             if(seq_lines)
                 draw_dialogue_box(seq_lines[seq_beat]);
             if(menu_mode == 1)
-                draw_bag_menu(&bag);
+                draw_bag_menu(&bag, marks);
             else if(menu_mode == 2)
-                draw_party_menu(got_shelf);
+                draw_party_menu(party_n > 0, &party[lead]);
+            if(in_battle)
+                draw_battle(&battle, &bag);
         }
 
         prev_start = start_now;
         prev_b = b_now;
         prev_y = y_now;
         prev_a = a_now;
+        prev_up = up_now;
+        prev_down = down_now;
     }
 }
