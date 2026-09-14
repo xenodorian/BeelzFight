@@ -1113,35 +1113,69 @@ static void draw_player(int cx, int cy, int dir, int anim_frame) {
  * Each sequence is shown one beat per A-press (matching sayn()'s
  * one-beat-per-advance in the reference), word-wrapped into the
  * dialogue box.
- * ---------------------------------------------------------------------- */
-static const char *const TALK_FATHER[] = {
-    "THERE'S A WAR. CRYTOWN IS ALREADY BLEEDING.",
-    "YOU'RE TOO SICK TO DEFEND IT FROM THE SOLDIERS. I KNOW THAT.",
-    "SO I'M STEALING YOUR CRYMON.",
-    "FATHER DOES NOT WAKE. THE CAPTURE CRYSTAL IS STILL ON THE SHELF.",
+ *
+ * Each beat also carries a speaker id (data.ts's own beat.speaker,
+ * "none" mapped to SPK_NONE), ported here for the first time: the
+ * reference shows a real character portrait next to the text whenever
+ * speaker isn't "none" (drawWorld()'s `drawSprite('port-${speaker}', ...)`).
+ * SPEAKER_PORTRAIT below is the id -> sprite lookup draw_dialogue_box
+ * uses; SPK_NONE (soldiers' anonymous lines, plain narration beats)
+ * draws no portrait, same as the reference. */
+typedef struct {
+    const char *text;
+    unsigned char speaker;
+} TalkBeat;
+
+#define SPK_NONE      0
+#define SPK_MAX       1
+#define SPK_ANNE      2
+#define SPK_MASON     3
+#define SPK_WREN      4
+#define SPK_MAE       5
+#define SPK_IVO       6
+#define SPK_NELL      7
+#define SPK_PIKE      8
+#define SPK_CALDER    9
+#define SPK_BRAM      10
+#define SPK_CATHLEEN  11
+#define SPK_SHINIGAMI 12
+
+#define PORTRAIT_W PORTRAIT_SPRITE_W
+#define PORTRAIT_H PORTRAIT_SPRITE_H
+static const u16 *const SPEAKER_PORTRAIT[13] = {
+    0, /* SPK_NONE */
+    port_max, port_anne, port_mason, port_wren, port_mae, port_ivo,
+    port_nell, port_pike, port_calder, port_bram, port_cathleen, port_shinigami,
 };
-static const char *const TALK_FATHER_AFTER[] = {
-    "I ALREADY TOOK QUILLPUP. SLEEP. I'LL DO THE FIGHTING.",
-    "HIS BREATH IS THIN. HE DOES NOT ANSWER.",
+
+static const TalkBeat TALK_FATHER[] = {
+    { "THERE'S A WAR. CRYTOWN IS ALREADY BLEEDING.", SPK_MAX },
+    { "YOU'RE TOO SICK TO DEFEND IT FROM THE SOLDIERS. I KNOW THAT.", SPK_MAX },
+    { "SO I'M STEALING YOUR CRYMON.", SPK_MAX },
+    { "FATHER DOES NOT WAKE. THE CAPTURE CRYSTAL IS STILL ON THE SHELF.", SPK_NONE },
 };
-static const char *const TALK_BED[] = {
-    "JUST UNTIL THEY BREATHE AGAIN.",
-    "MAX'S EMPTY BED. THE CRYMON SLEEP. CUTS CLOSE. SPECIALS RETURN.",
+static const TalkBeat TALK_FATHER_AFTER[] = {
+    { "I ALREADY TOOK QUILLPUP. SLEEP. I'LL DO THE FIGHTING.", SPK_MAX },
+    { "HIS BREATH IS THIN. HE DOES NOT ANSWER.", SPK_NONE },
 };
-static const char *const TALK_SHELF[] = {
-    "THIS IS IT. FATHER'S CRYSTAL. QUILLPUP IS INSIDE.",
-    "THE CRYSTAL BREAKS WARM IN HER HANDS. QUILLPUP SHAKES OUT ONTO THE FLOORBOARDS.",
-    "YOU'RE COMING. CRYTOWN DOESN'T GET TO FALL.",
+static const TalkBeat TALK_BED[] = {
+    { "JUST UNTIL THEY BREATHE AGAIN.", SPK_MAX },
+    { "MAX'S EMPTY BED. THE CRYMON SLEEP. CUTS CLOSE. SPECIALS RETURN.", SPK_NONE },
 };
-static const char *const TALK_SHELF_EMPTY[] = {
-    "DUST. THE CRYSTAL IS ALREADY OPEN.",
+static const TalkBeat TALK_SHELF[] = {
+    { "THIS IS IT. FATHER'S CRYSTAL. QUILLPUP IS INSIDE.", SPK_MAX },
+    { "THE CRYSTAL BREAKS WARM IN HER HANDS. QUILLPUP SHAKES OUT ONTO THE FLOORBOARDS.", SPK_NONE },
+    { "YOU'RE COMING. CRYTOWN DOESN'T GET TO FALL.", SPK_MAX },
 };
-static const char *const TALK_CRATE[] = {
-    "A WRAP. HE WON'T MISS IT.",
-    "A LINEN WRAP UNDER THE LID. YOU TAKE IT.",
+static const TalkBeat TALK_SHELF_EMPTY[] = {
+    { "DUST. THE CRYSTAL IS ALREADY OPEN.", SPK_MAX },
 };
-static const char *const TALK_CRATE_EMPTY[] = {
-    "SPLINTERS AND A MOTH. EMPTY.",
+static const TalkBeat TALK_CRATE[] = {
+    { "A WRAP. HE WON'T MISS IT.", SPK_MAX },
+    { "A LINEN WRAP UNDER THE LID. YOU TAKE IT.", SPK_NONE },
+};
+static const TalkBeat TALK_CRATE_EMPTY[] = {
+    { "SPLINTERS AND A MOTH. EMPTY.", SPK_MAX },
 };
 
 /* Door/warp flavor lines, data.TALK.doorLocked/doorOut/cottage/
@@ -1149,220 +1183,220 @@ static const char *const TALK_CRATE_EMPTY[] = {
    also kicks off the Mason NPC encounter (masonPh) the first time you
    leave the house; that's NPC/battle content not built yet, so this
    step always shows doorOut's plain flavor text instead. */
-static const char *const TALK_DOOR_LOCKED[] = {
-    "NOT YET. FATHER'S CRYMON IS STILL ON THE SHELF.",
+static const TalkBeat TALK_DOOR_LOCKED[] = {
+    { "NOT YET. FATHER'S CRYMON IS STILL ON THE SHELF.", SPK_MAX },
 };
-static const char *const TALK_DOOR_OUT[] = {
-    "NIGHT AIR. I CAN DO THIS.",
-    "TALL GRASS HIDES CRYMON. WREN WEST. POND EAST. BRAM ON THE PATH. CALDER SOUTH.",
+static const TalkBeat TALK_DOOR_OUT[] = {
+    { "NIGHT AIR. I CAN DO THIS.", SPK_MAX },
+    { "TALL GRASS HIDES CRYMON. WREN WEST. POND EAST. BRAM ON THE PATH. CALDER SOUTH.", SPK_NONE },
 };
-static const char *const TALK_COTTAGE[] = {
-    "THE COTTAGE. FATHER IN THE BED. MY BED. SOUTH DOOR LEAVES.",
+static const TalkBeat TALK_COTTAGE[] = {
+    { "THE COTTAGE. FATHER IN THE BED. MY BED. SOUTH DOOR LEAVES.", SPK_MAX },
 };
-static const char *const TALK_FOREST_ENTER[] = {
-    "THE TREES CLOSE OVER THE PATH.",
-    "TALL GRASS. PATROLS. IF THEY SEE YOU, THEY WILL COME. THE PATH KEEPS SOUTH.",
+static const TalkBeat TALK_FOREST_ENTER[] = {
+    { "THE TREES CLOSE OVER THE PATH.", SPK_MAX },
+    { "TALL GRASS. PATROLS. IF THEY SEE YOU, THEY WILL COME. THE PATH KEEPS SOUTH.", SPK_NONE },
 };
-static const char *const TALK_FOREST_LEAVE[] = {
-    "BACK TOWARD THE COTTAGE PATH.",
+static const TalkBeat TALK_FOREST_LEAVE[] = {
+    { "BACK TOWARD THE COTTAGE PATH.", SPK_MAX },
 };
-static const char *const TALK_GROVE_ENTER[] = {
-    "THE GRASS DIES OUT. STONE AND HUSH.",
-    "NO TALL GRASS. SOMETHING WAITS ON THE PATH.",
+static const TalkBeat TALK_GROVE_ENTER[] = {
+    { "THE GRASS DIES OUT. STONE AND HUSH.", SPK_MAX },
+    { "NO TALL GRASS. SOMETHING WAITS ON THE PATH.", SPK_NONE },
 };
-static const char *const TALK_GROVE_LEAVE[] = {
-    "BACK UNDER THE TREES.",
+static const TalkBeat TALK_GROVE_LEAVE[] = {
+    { "BACK UNDER THE TREES.", SPK_MAX },
 };
-static const char *const TALK_CAMP_ENTER[] = {
-    "TENTS, COLD FIRES. THE CAMP AT LAST.",
-    "SOMEONE IS STILL HERE.",
+static const TalkBeat TALK_CAMP_ENTER[] = {
+    { "TENTS, COLD FIRES. THE CAMP AT LAST.", SPK_NONE },
+    { "SOMEONE IS STILL HERE.", SPK_NONE },
 };
-static const char *const TALK_CAMP_LEAVE[] = {
-    "BACK TOWARD CALDER'S GROUND.",
+static const TalkBeat TALK_CAMP_LEAVE[] = {
+    { "BACK TOWARD CALDER'S GROUND.", SPK_NONE },
 };
 
 /* Remaining data.TALK entries: the VELD/FOREST/GROVE NPCs, Mason,
    Anne, and Bram's shop-open line. Ported verbatim except upper-cased,
    same as every TALK_* array above. */
-static const char *const TALK_MASON_FIGHT[] = {
-    "YOU WALKED OUT WITH THAT HOUND.",
-    "HE'S MINE.",
-    "I ALREADY CAUGHT A CRYMON. FIGHT ME.",
+static const TalkBeat TALK_MASON_FIGHT[] = {
+    { "YOU WALKED OUT WITH THAT HOUND.", SPK_MASON },
+    { "HE'S MINE.", SPK_MAX },
+    { "I ALREADY CAUGHT A CRYMON. FIGHT ME.", SPK_MASON },
 };
-static const char *const TALK_MASON_AFTER[] = {
-    "FINE. CALDER IS STILL SOUTH.",
-    "I WON'T DIE FIRST.",
+static const TalkBeat TALK_MASON_AFTER[] = {
+    { "FINE. CALDER IS STILL SOUTH.", SPK_MASON },
+    { "I WON'T DIE FIRST.", SPK_MAX },
 };
-static const char *const TALK_MASON_WIN[] = {
-    "MASON SPITS IN THE DIRT. THE PATH IS YOURS. CALDER STILL WAITS SOUTH.",
+static const TalkBeat TALK_MASON_WIN[] = {
+    { "MASON SPITS IN THE DIRT. THE PATH IS YOURS. CALDER STILL WAITS SOUTH.", SPK_NONE },
 };
 /* Mason's rematch, ambush dialogue -- see main()'s mason2_* state and
    the world-actors section comment for the full trigger chain. */
-static const char *const TALK_MASON_FIGHT2[] = {
-    "YOU. AGAIN.",
-    "I TRAINED SINCE CALDER FELL. THREE CRYMON THIS TIME.",
-    "NO MERCY NOW.",
+static const TalkBeat TALK_MASON_FIGHT2[] = {
+    { "YOU. AGAIN.", SPK_MASON },
+    { "I TRAINED SINCE CALDER FELL. THREE CRYMON THIS TIME.", SPK_MASON },
+    { "NO MERCY NOW.", SPK_MASON },
 };
-static const char *const TALK_MASON_WIN2[] = {
-    "MASON KNEELS. THREE DOWN. HE HAS NOTHING LEFT TO PROVE.",
+static const TalkBeat TALK_MASON_WIN2[] = {
+    { "MASON KNEELS. THREE DOWN. HE HAS NOTHING LEFT TO PROVE.", SPK_NONE },
 };
-static const char *const TALK_WREN_FIRST[] = {
-    "TOO YOUNG. TAKE THE SALVE. CALDER CAMPS SOUTH.",
-    "I'M NOT TOO YOUNG.",
-    "WEST IS IVO. EAST IS NELL. KEEP THAT HOUND FED.",
+static const TalkBeat TALK_WREN_FIRST[] = {
+    { "TOO YOUNG. TAKE THE SALVE. CALDER CAMPS SOUTH.", SPK_WREN },
+    { "I'M NOT TOO YOUNG.", SPK_MAX },
+    { "WEST IS IVO. EAST IS NELL. KEEP THAT HOUND FED.", SPK_WREN },
 };
-static const char *const TALK_WREN_BEAT[] = {
-    "YOU BEAT HIM. THE WAR STILL WANTS MORE OF US.",
-    "THEN IT CAN WAIT.",
+static const TalkBeat TALK_WREN_BEAT[] = {
+    { "YOU BEAT HIM. THE WAR STILL WANTS MORE OF US.", SPK_WREN },
+    { "THEN IT CAN WAIT.", SPK_MAX },
 };
-static const char *const TALK_WREN_CART[] = {
-    "YOU FOUND THEIR LETTER. THEY ALREADY KNEW YOUR NAME.",
-    "I READ IT ANYWAY.",
+static const TalkBeat TALK_WREN_CART[] = {
+    { "YOU FOUND THEIR LETTER. THEY ALREADY KNEW YOUR NAME.", SPK_WREN },
+    { "I READ IT ANYWAY.", SPK_MAX },
 };
-static const char *const TALK_WREN_HEAL[] = {
-    "CUTS BOUND. SPECIALS RETURN. KEEP THEM FED.",
-    "THANK YOU.",
+static const TalkBeat TALK_WREN_HEAL[] = {
+    { "CUTS BOUND. SPECIALS RETURN. KEEP THEM FED.", SPK_WREN },
+    { "THANK YOU.", SPK_MAX },
 };
-static const char *const TALK_MAE_FIRST[] = {
-    "YOU'RE MAX. I WATCHED YOU LEAVE THE HOUSE.",
-    "DON'T FOLLOW ME.",
-    "I WON'T. TAKE THE WRAP. WREN HEALS. I JUST DIDN'T WANT THE PATH EMPTY.",
+static const TalkBeat TALK_MAE_FIRST[] = {
+    { "YOU'RE MAX. I WATCHED YOU LEAVE THE HOUSE.", SPK_MAE },
+    { "DON'T FOLLOW ME.", SPK_MAX },
+    { "I WON'T. TAKE THE WRAP. WREN HEALS. I JUST DIDN'T WANT THE PATH EMPTY.", SPK_MAE },
 };
-static const char *const TALK_MAE_AGAIN[] = {
-    "I'LL BE HERE. SOUTH STILL DRUMS.",
-    "I HEAR THEM.",
+static const TalkBeat TALK_MAE_AGAIN[] = {
+    { "I'LL BE HERE. SOUTH STILL DRUMS.", SPK_MAE },
+    { "I HEAR THEM.", SPK_MAX },
 };
-static const char *const TALK_IVO_FIRST[] = {
-    "CAMP TOOK MY CRYMON. CHEW THIS. CALDER SITS SOUTH.",
-    "I'M GOING SOUTH ANYWAY.",
-    "DON'T GIVE HIM A CLEAN FIGHT.",
+static const TalkBeat TALK_IVO_FIRST[] = {
+    { "CAMP TOOK MY CRYMON. CHEW THIS. CALDER SITS SOUTH.", SPK_IVO },
+    { "I'M GOING SOUTH ANYWAY.", SPK_MAX },
+    { "DON'T GIVE HIM A CLEAN FIGHT.", SPK_IVO },
 };
-static const char *const TALK_IVO_AGAIN[] = {
-    "HIT FIRST. RUN IF THE BAT FOLDS YOU.",
-    "I DON'T RUN YET.",
+static const TalkBeat TALK_IVO_AGAIN[] = {
+    { "HIT FIRST. RUN IF THE BAT FOLDS YOU.", SPK_IVO },
+    { "I DON'T RUN YET.", SPK_MAX },
 };
-static const char *const TALK_NELL_FIRST[] = {
-    "TOO YOUNG. DRINK THIS ANYWAY. REEDS HIDE A STONE.",
-    "I CAN HOLD A CRYSTAL.",
+static const TalkBeat TALK_NELL_FIRST[] = {
+    { "TOO YOUNG. DRINK THIS ANYWAY. REEDS HIDE A STONE.", SPK_NELL },
+    { "I CAN HOLD A CRYSTAL.", SPK_MAX },
 };
-static const char *const TALK_NELL_BONUS[] = {
-    "THAT MOTH WASN'T YOURS YESTERDAY. ANOTHER SALVE.",
-    "I CAUGHT IT FAIR.",
+static const TalkBeat TALK_NELL_BONUS[] = {
+    { "THAT MOTH WASN'T YOURS YESTERDAY. ANOTHER SALVE.", SPK_NELL },
+    { "I CAUGHT IT FAIR.", SPK_MAX },
 };
-static const char *const TALK_NELL_AGAIN[] = {
-    "THE POND KEEPS SECRETS. SOUTH STILL DRUMS.",
-    "I HEAR THEM.",
+static const TalkBeat TALK_NELL_AGAIN[] = {
+    { "THE POND KEEPS SECRETS. SOUTH STILL DRUMS.", SPK_NELL },
+    { "I HEAR THEM.", SPK_MAX },
 };
-static const char *const TALK_PIKE_FIRST[] = {
-    "I DROPPED A MOONSTONE IN THE EAST REEDS. DON'T TELL WREN.",
-    "I WON'T TELL WREN.",
+static const TalkBeat TALK_PIKE_FIRST[] = {
+    { "I DROPPED A MOONSTONE IN THE EAST REEDS. DON'T TELL WREN.", SPK_PIKE },
+    { "I WON'T TELL WREN.", SPK_MAX },
 };
-static const char *const TALK_PIKE_HELP[] = {
-    "YOU FOUND IT? KEEP THE STONE. TAKE THIS WRAP.",
-    "I WAS ONLY LOOKING.",
+static const TalkBeat TALK_PIKE_HELP[] = {
+    { "YOU FOUND IT? KEEP THE STONE. TAKE THIS WRAP.", SPK_PIKE },
+    { "I WAS ONLY LOOKING.", SPK_MAX },
 };
-static const char *const TALK_PIKE_DONE[] = {
-    "THE CLIFFS ARE JUST ROCKS. THE WAR IS THE SCARY PART.",
-    "I KNOW.",
+static const TalkBeat TALK_PIKE_DONE[] = {
+    { "THE CLIFFS ARE JUST ROCKS. THE WAR IS THE SCARY PART.", SPK_PIKE },
+    { "I KNOW.", SPK_MAX },
 };
-static const char *const TALK_PIKE_HINT[] = {
-    "EAST OF THE PATH. IN THE TALL GRASS BY THE WATER.",
+static const TalkBeat TALK_PIKE_HINT[] = {
+    { "EAST OF THE PATH. IN THE TALL GRASS BY THE WATER.", SPK_PIKE },
 };
-static const char *const TALK_HERB[] = {
-    "BITTERROOT. STR +4 IF I LAST.",
+static const TalkBeat TALK_HERB[] = {
+    { "BITTERROOT. STR +4 IF I LAST.", SPK_MAX },
 };
-static const char *const TALK_HERB_GONE[] = {
-    "A HOLE WHERE THE HERB WAS. ONLY GRIT.",
+static const TalkBeat TALK_HERB_GONE[] = {
+    { "A HOLE WHERE THE HERB WAS. ONLY GRIT.", SPK_MAX },
 };
-static const char *const TALK_GEM_PIKE[] = {
-    "PIKE'S MOONSTONE. HE SAID KEEP IT.",
+static const TalkBeat TALK_GEM_PIKE[] = {
+    { "PIKE'S MOONSTONE. HE SAID KEEP IT.", SPK_MAX },
 };
-static const char *const TALK_GEM_WILD[] = {
-    "A CAPTURE CRYSTAL. SOMEONE SMALL LOST THIS.",
+static const TalkBeat TALK_GEM_WILD[] = {
+    { "A CAPTURE CRYSTAL. SOMEONE SMALL LOST THIS.", SPK_MAX },
 };
-static const char *const TALK_GEM_GONE[] = {
-    "MUD AND A FROG. THE STONE IS ALREADY MINE.",
+static const TalkBeat TALK_GEM_GONE[] = {
+    { "MUD AND A FROG. THE STONE IS ALREADY MINE.", SPK_MAX },
 };
-static const char *const TALK_STUMP[] = {
-    "A WRAP JAMMED IN THE STUMP. I TAKE IT.",
+static const TalkBeat TALK_STUMP[] = {
+    { "A WRAP JAMMED IN THE STUMP. I TAKE IT.", SPK_MAX },
 };
-static const char *const TALK_STUMP_GONE[] = {
-    "JUST A STUMP. ANTS. NO MORE CLOTH.",
+static const TalkBeat TALK_STUMP_GONE[] = {
+    { "JUST A STUMP. ANTS. NO MORE CLOTH.", SPK_MAX },
 };
-static const char *const TALK_CART[] = {
-    "THEY ALREADY KNEW MY NAME.",
-    "A CAMP LETTER ON THE WRECK, SEND THE COTTAGE GIRL SOUTH. WE NEED BODIES.",
+static const TalkBeat TALK_CART[] = {
+    { "THEY ALREADY KNEW MY NAME.", SPK_MAX },
+    { "A CAMP LETTER ON THE WRECK, SEND THE COTTAGE GIRL SOUTH. WE NEED BODIES.", SPK_NONE },
 };
-static const char *const TALK_CALDER_AFTER[] = {
-    "SOUTH IS THE CAMP. DON'T DIE STUPID.",
-    "I DON'T PLAN TO.",
+static const TalkBeat TALK_CALDER_AFTER[] = {
+    { "SOUTH IS THE CAMP. DON'T DIE STUPID.", SPK_CALDER },
+    { "I DON'T PLAN TO.", SPK_MAX },
 };
-static const char *const TALK_CALDER_FIGHT[] = {
-    "THE CAMP TAKES STRAYS.",
-    "I'M NOT STRAY.",
+static const TalkBeat TALK_CALDER_FIGHT[] = {
+    { "THE CAMP TAKES STRAYS.", SPK_CALDER },
+    { "I'M NOT STRAY.", SPK_MAX },
 };
 /* Shown once battle_finish_win() ends a Calder fight, replacing the
    old instant cut to ENDING_WIN -- see MAP_CAMP's section comment.
    BAFTER_ITEM (like every other trainer win message) returns to the
    world once closed, no post_action needed here. */
-static const char *const TALK_CALDER_WIN[] = {
-    "CALDER FALLS. THE PATH SOUTH IS CLEAR.",
-    "THE CAMP WAITS.",
+static const TalkBeat TALK_CALDER_WIN[] = {
+    { "CALDER FALLS. THE PATH SOUTH IS CLEAR.", SPK_NONE },
+    { "THE CAMP WAITS.", SPK_NONE },
 };
 /* The camp commander (mark 'I' on MAP_CAMP): first visit queues
    POST_ENDING_WIN, which shows ENDING_WIN once this closes -- the
    real payoff every "the camp" line in this file was pointing at. */
-static const char *const TALK_CAMP_COMMANDER[] = {
-    "SO YOU'RE THE ONE WHO BEAT CALDER.",
-    "CRYTOWN SENDS AN EIGHT YEAR OLD. FINE.",
-    "TAKE THE ROAD BACK. THIS WAR ISN'T YOURS TO FINISH.",
+static const TalkBeat TALK_CAMP_COMMANDER[] = {
+    { "SO YOU'RE THE ONE WHO BEAT CALDER.", SPK_NONE },
+    { "CRYTOWN SENDS AN EIGHT YEAR OLD. FINE.", SPK_NONE },
+    { "TAKE THE ROAD BACK. THIS WAR ISN'T YOURS TO FINISH.", SPK_NONE },
 };
-static const char *const TALK_CATHLEEN_SPOT[] = {
-    "YOU WALKED THE PATH. I AM THE PATH'S ANSWER.",
-    "YOU'RE A CRYMON.",
-    "I AM CATHLEEN. I FIGHT AS MYSELF.",
+static const TalkBeat TALK_CATHLEEN_SPOT[] = {
+    { "YOU WALKED THE PATH. I AM THE PATH'S ANSWER.", SPK_CATHLEEN },
+    { "YOU'RE A CRYMON.", SPK_MAX },
+    { "I AM CATHLEEN. I FIGHT AS MYSELF.", SPK_CATHLEEN },
 };
-static const char *const TALK_CATHLEEN_AFTER[] = {
-    "YOU STAND. COME AGAIN IF YOU MEAN TO KEEP ME.",
-    "I MIGHT.",
+static const TalkBeat TALK_CATHLEEN_AFTER[] = {
+    { "YOU STAND. COME AGAIN IF YOU MEAN TO KEEP ME.", SPK_CATHLEEN },
+    { "I MIGHT.", SPK_MAX },
 };
-static const char *const TALK_CATHLEEN_GONE[] = {
-    "ONLY THE HOOD'S SHADOW. SHE'S WITH ME NOW.",
+static const TalkBeat TALK_CATHLEEN_GONE[] = {
+    { "ONLY THE HOOD'S SHADOW. SHE'S WITH ME NOW.", SPK_MAX },
 };
-static const char *const TALK_SHINIGAMI_SPOT[] = {
-    "THREE NAMES. THREE GRAVES. I KEEP THEM.",
-    "YOU'RE IN THE WAY.",
-    "CRYMARE. COME.",
+static const TalkBeat TALK_SHINIGAMI_SPOT[] = {
+    { "THREE NAMES. THREE GRAVES. I KEEP THEM.", SPK_SHINIGAMI },
+    { "YOU'RE IN THE WAY.", SPK_MAX },
+    { "CRYMARE. COME.", SPK_SHINIGAMI },
 };
-static const char *const TALK_SHINIGAMI_DONE[] = {
-    "THE GRAVES ARE QUIET. GO.",
+static const TalkBeat TALK_SHINIGAMI_DONE[] = {
+    { "THE GRAVES ARE QUIET. GO.", SPK_SHINIGAMI },
 };
-static const char *const TALK_SOLDIER_SPOT[] = {
-    "A SOLDIER SEES YOU. YOU THERE! THIS WOOD IS CAMP GROUND.",
-    "I'M PASSING THROUGH.",
+static const TalkBeat TALK_SOLDIER_SPOT[] = {
+    { "A SOLDIER SEES YOU. YOU THERE! THIS WOOD IS CAMP GROUND.", SPK_NONE },
+    { "I'M PASSING THROUGH.", SPK_MAX },
 };
-static const char *const TALK_SOLDIER_DONE[] = {
-    "THEY ALREADY LOST. THEY WILL NOT RISE.",
+static const TalkBeat TALK_SOLDIER_DONE[] = {
+    { "THEY ALREADY LOST. THEY WILL NOT RISE.", SPK_NONE },
 };
 /* finishWin()'s soldier branch uses a raw say1() string identical to
    TALK.soldierAfter's text rather than the table entry itself -- the
    source has both; we just use one array for it. */
-static const char *const TALK_SOLDIER_AFTER[] = {
-    "THE SOLDIER SITS. GO. BEFORE I CHANGE MY MIND.",
+static const TalkBeat TALK_SOLDIER_AFTER[] = {
+    { "THE SOLDIER SITS. GO. BEFORE I CHANGE MY MIND.", SPK_NONE },
 };
-static const char *const TALK_BRAM_OPEN[] = {
-    "MARKS FOR MOSS, WRAPS, STONES. BUY OR SELL.",
-    "I HAVE CUTS. I NEED STONES.",
+static const TalkBeat TALK_BRAM_OPEN[] = {
+    { "MARKS FOR MOSS, WRAPS, STONES. BUY OR SELL.", SPK_BRAM },
+    { "I HAVE CUTS. I NEED STONES.", SPK_MAX },
 };
 /* data.TALK.anneGift/anneAgain: Anne is reachable after all -- see the
    world-NPC section comment further down for the correction (the
    canonical src/game/engine.ts calls maybeStartAnne(); only the Lua
    intermediate's own call site was missing). */
-static const char *const TALK_ANNE_GIFT[] = {
-    "MAX. YOU ACTUALLY FOUGHT.",
-    "TAKE THESE. FIVE CRYSTALS. DON'T WASTE THEM ON THE FIRST MOTH.",
-    "I WON'T.",
-    "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAX'S PALM. XTALS +5.",
+static const TalkBeat TALK_ANNE_GIFT[] = {
+    { "MAX. YOU ACTUALLY FOUGHT.", SPK_ANNE },
+    { "TAKE THESE. FIVE CRYSTALS. DON'T WASTE THEM ON THE FIRST MOTH.", SPK_ANNE },
+    { "I WON'T.", SPK_MAX },
+    { "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAX'S PALM. XTALS +5.", SPK_NONE },
 };
 /* data.ENDING_WIN / data.DEMO_END, shown by the new ending screen
    (draw_ending() in main()) after beating Calder / Shinigami. */
@@ -1380,14 +1414,28 @@ static const char *const DEMO_END[] = {
 
 #define TALK_LEN(arr) (int)(sizeof(arr) / sizeof((arr)[0]))
 
-#define DIALOGUE_MAX_CHARS 37
+/* Box grew from a plain 40px text strip to 58px to fit a portrait
+   column (PORTRAIT_W=32 plus margins) alongside the text -- the
+   column is reserved even on a SPK_NONE beat (nothing drawn there)
+   so the text's wrap width stays constant regardless of speaker,
+   rather than reflowing every line depending on whether a portrait
+   is showing. Every existing TALK_* beat was re-checked against this
+   narrower 32-char wrap and stays within 3 lines. */
+#define DIALOGUE_BOX_Y     (SCREEN_H - 58)
+#define DIALOGUE_BOX_H     58
+#define DIALOGUE_MAX_CHARS 32
 #define DIALOGUE_LINE_H    9
+#define DIALOGUE_TEXT_X    (4 + 4 + PORTRAIT_W + 6)
 
-static void draw_dialogue_box(const char *line) {
-    fill_rect(4, SCREEN_H - 44, SCREEN_W - 8, 40, rgb565(18, 17, 14));
-    fill_rect(4, SCREEN_H - 44, SCREEN_W - 8, 2, rgb565(197, 206, 198));
-    fill_rect(4, SCREEN_H - 6, SCREEN_W - 8, 2, rgb565(197, 206, 198));
-    draw_wrapped(line, 12, SCREEN_H - 38, rgb565(232, 228, 216), DIALOGUE_SCALE,
+static void draw_dialogue_box(const TalkBeat *beat) {
+    fill_rect(4, DIALOGUE_BOX_Y, SCREEN_W - 8, DIALOGUE_BOX_H, rgb565(18, 17, 14));
+    fill_rect(4, DIALOGUE_BOX_Y, SCREEN_W - 8, 2, rgb565(197, 206, 198));
+    fill_rect(4, DIALOGUE_BOX_Y + DIALOGUE_BOX_H - 2, SCREEN_W - 8, 2, rgb565(197, 206, 198));
+    if(beat->speaker != SPK_NONE)
+        blit_sprite(SPEAKER_PORTRAIT[beat->speaker], PORTRAIT_W, PORTRAIT_H,
+                    4 + 4, DIALOGUE_BOX_Y + (DIALOGUE_BOX_H - PORTRAIT_H) / 2);
+    draw_wrapped(beat->text, DIALOGUE_TEXT_X, DIALOGUE_BOX_Y + 8,
+                 rgb565(232, 228, 216), DIALOGUE_SCALE,
                  DIALOGUE_MAX_CHARS, DIALOGUE_LINE_H);
 }
 
@@ -3015,7 +3063,7 @@ void main(void) {
        dialogue is showing. post_action fires once the sequence
        finishes (state.lua's afterTalk/beginTalkEnd): starting a
        trainer battle or opening the shop. */
-    const char *const *seq_lines = 0;
+    const TalkBeat *seq_lines = 0;
     int seq_len = 0, seq_beat = 0;
     int post_action = 0, post_soldier_id = 0;
 #define POST_NONE        0
@@ -4441,7 +4489,7 @@ void main(void) {
             draw_player(px - cam_x, py - cam_y, pdir, anim_counter / 10);
             draw_hud(got_shelf, looted_crate, bag.bandage);
             if(seq_lines)
-                draw_dialogue_box(seq_lines[seq_beat]);
+                draw_dialogue_box(&seq_lines[seq_beat]);
             else if(hud_t > 0)
                 draw_hud_toast(hud_flash);
             if(menu_mode == 1)

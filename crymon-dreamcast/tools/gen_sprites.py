@@ -111,6 +111,20 @@ BATTLE_BG_W, BATTLE_BG_H = 320, 240
 ITEM_ICONS = ['salve', 'bandage', 'bitterroot', 'dust', 'gem']
 ITEM_ICON_W, ITEM_ICON_H = 14, 14
 
+# Dialogue-box character portraits (public/sprites/portraits/<name>.png,
+# source art 160x200 to 225x225 depending on character), downscaled to
+# a small column that fits next to the wrapped text -- see
+# draw_dialogue_box()/PORTRAIT_W/PORTRAIT_H in main.c. Only the
+# speakers TALK's beats actually use (SPK_* in main.c) are pulled;
+# the reference has portraits for every battle species too
+# (port-quillpup etc, shown on the battle-intro screen this port
+# doesn't have), not needed here.
+PORTRAITS = [
+    'max', 'anne', 'mason', 'wren', 'mae', 'ivo', 'nell', 'pike',
+    'calder', 'bram', 'cathleen', 'shinigami',
+]
+PORTRAIT_W, PORTRAIT_H = 32, 40
+
 def rgb565(r, g, b):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
@@ -213,6 +227,14 @@ def main():
         im = Image.open(os.path.join(root, 'items', '%s.png' % name))
         pixels = encode(im, ITEM_ICON_W, ITEM_ICON_H)
         emit_array(lines, 'icon_%s' % name, pixels, ITEM_ICON_W, ITEM_ICON_H)
+
+    lines.append('#define PORTRAIT_SPRITE_W %d' % PORTRAIT_W)
+    lines.append('#define PORTRAIT_SPRITE_H %d' % PORTRAIT_H)
+    lines.append('')
+    for name in PORTRAITS:
+        im = Image.open(os.path.join(root, 'portraits', '%s.png' % name))
+        pixels = encode(im, PORTRAIT_W, PORTRAIT_H)
+        emit_array(lines, 'port_%s' % name, pixels, PORTRAIT_W, PORTRAIT_H)
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
