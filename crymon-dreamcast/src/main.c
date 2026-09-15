@@ -1476,13 +1476,21 @@ static const char *const DEMO_END[] = {
 /* No background panel -- outlined text (draw_glyph's own 1px black
    border) reads fine directly over the world/battle scene, so the
    dialogue box is really just a portrait plus wrapped text at a fixed
-   screen position now, not an actual drawn box. */
+   screen position now, not an actual drawn box.
+
+   Horizontal placement now tells the two sides apart at a glance:
+   Max (the player) sits flush against the box's own left edge --
+   already a safe 4px in from the screen edge, PORTRAIT_BOX_X's own
+   buffer, so nothing crops -- and every NPC sits flush against the
+   right edge instead of the old dead-center placement. Vertical
+   centering is unchanged. */
 static void draw_dialogue_box(const TalkBeat *beat) {
     if(beat->speaker != SPK_NONE) {
         const Portrait *p = &SPEAKER_PORTRAIT[beat->speaker];
-        blit_sprite(p->px, p->w, p->h,
-                    PORTRAIT_BOX_X + (PORTRAIT_BOX_W - p->w) / 2,
-                    PORTRAIT_BOX_Y + (PORTRAIT_BOX_H - p->h) / 2);
+        int px = (beat->speaker == SPK_MAX)
+                     ? PORTRAIT_BOX_X
+                     : PORTRAIT_BOX_X + PORTRAIT_BOX_W - p->w;
+        blit_sprite(p->px, p->w, p->h, px, PORTRAIT_BOX_Y + (PORTRAIT_BOX_H - p->h) / 2);
     }
     draw_wrapped(beat->text, 8, DIALOGUE_TEXT_Y + 8,
                  0xFFFF, DIALOGUE_SCALE,
@@ -2451,35 +2459,46 @@ static int try_encounter(int map_id, int px, int py, int party_n,
  * directly over the battle background/sprites now, just outlined.
  * ---------------------------------------------------------------------- */
 
-/* Layout: foe status + foe sprite occupy the top row (status box
-   top-left, sprite top-right, classic JRPG split); the message/menu
-   box is anchored bottom-right instead of spanning the full screen
-   width, with the player's own status box directly above it (same
-   width/x); the player's sprite sits in the freed-up lower-left
-   corner, directly above the message/menu box -- not stacked with
-   the foe sprite in the corner the two used to share. BCONTENT_W is
-   sized for the item menu's longest row (see draw_battle_item_menu's
-   shortened labels) rather than the full screen, and BCONTENT_H for
-   its tallest phase (the item menu's up to 6 rows). */
-#define BFOE_BOX_X    4
-#define BFOE_BOX_Y    4
-#define BFOE_BOX_W    172
-#define BFOE_BOX_H    32
+/* Four corners, one each: the foe's CryMon and its status box sit in
+   the upper right (sprite flush in the corner, box directly below
+   it, both right-aligned to each other); Max's CryMon and its status
+   box sit in the lower left (sprite flush in the corner, box directly
+   above it); the message/menu box sits in the lower right. BSTATUS_*
+   is shared by both status boxes so they read as a matched pair --
+   narrow enough (98px) that the player's, tucked against the
+   lower-left corner, clears the message/menu box's own left edge
+   with room to spare, so a stacked name/level/HP layout (3 rows)
+   replaces the old wider 2-row one. BCONTENT_W is sized for the item
+   menu's longest row (see draw_battle_item_menu's shortened labels)
+   rather than the full screen, and BCONTENT_H for its tallest phase
+   (the item menu's up to 6 rows). BGAP is the fixed clearance kept
+   between every pair of these four corner elements. */
+#define BGAP          4
+
 #define BFOE_SPRITE_X (SCREEN_W - 8 - MONSTER_SPRITE_W)
 #define BFOE_SPRITE_Y 4
+
+#define BSTATUS_BOX_W 98
+#define BSTATUS_BOX_H 48
+#define BSTATUS_ROW_H 13
+
+#define BFOE_BOX_W    BSTATUS_BOX_W
+#define BFOE_BOX_H    BSTATUS_BOX_H
+#define BFOE_BOX_X    (BFOE_SPRITE_X + MONSTER_SPRITE_W - BSTATUS_BOX_W)
+#define BFOE_BOX_Y    (BFOE_SPRITE_Y + MONSTER_SPRITE_H + BGAP)
 
 #define BCONTENT_W    210
 #define BCONTENT_H    120
 #define BCONTENT_X    (SCREEN_W - 4 - BCONTENT_W)
 #define BCONTENT_Y    (SCREEN_H - 4 - BCONTENT_H)
 
-#define BPL_BOX_X     BCONTENT_X
-#define BPL_BOX_W     BCONTENT_W
-#define BPL_BOX_H     32
-#define BPL_BOX_Y     (BCONTENT_Y - 4 - BPL_BOX_H)
-
 #define BPL_SPRITE_X  8
-#define BPL_SPRITE_Y  (BCONTENT_Y - MONSTER_SPRITE_H - 4)
+#define BPL_SPRITE_Y  (SCREEN_H - 4 - MONSTER_SPRITE_H)
+
+#define BPL_BOX_W     BSTATUS_BOX_W
+#define BPL_BOX_H     BSTATUS_BOX_H
+#define BPL_BOX_X     4
+#define BPL_BOX_Y     (BPL_SPRITE_Y - BGAP - BSTATUS_BOX_H)
 
 #define BROW_H        16
 
@@ -2525,31 +2544,39 @@ static void draw_battle_status(const Battle *b) {
     char buf[40];
     int n;
 
+    /* Stacked name / level / HP, 3 rows -- BSTATUS_BOX_W (98px) is
+       too narrow for the old 2-row "NAME LVxx" line on the longest
+       species names, now that both status boxes are corner-sized
+       rather than spanning most of the screen width. */
     n = s_cat(buf, 0, b->foe.shiny ? "*" : "");
     n = s_cat(buf, n, SPECIES[b->foe.species].name);
-    n = s_cat(buf, n, " LV");
+    buf[n] = 0;
+    draw_text_s(buf, BFOE_BOX_X + 4, BFOE_BOX_Y + 4, 0xFFFF, MENU_SCALE);
+    n = s_cat(buf, 0, "LV");
     n = s_cat_uint(buf, n, b->foe.lv);
     buf[n] = 0;
-    draw_text_s(buf, BFOE_BOX_X + 6, BFOE_BOX_Y + 4, rgb565(232, 228, 216), MENU_SCALE);
+    draw_text_s(buf, BFOE_BOX_X + 4, BFOE_BOX_Y + 4 + BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
     n = s_cat(buf, 0, "HP ");
     n = s_cat_uint(buf, n, b->foe.hp);
     n = s_cat(buf, n, "/");
     n = s_cat_uint(buf, n, b->foe.maxHp);
     buf[n] = 0;
-    draw_text_s(buf, BFOE_BOX_X + 6, BFOE_BOX_Y + 4 + MENU_ROW_H, rgb565(197, 206, 198), MENU_SCALE);
+    draw_text_s(buf, BFOE_BOX_X + 4, BFOE_BOX_Y + 4 + 2 * BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
 
     n = s_cat(buf, 0, b->pl.shiny ? "*" : "");
     n = s_cat(buf, n, SPECIES[b->pl.species].name);
-    n = s_cat(buf, n, " LV");
+    buf[n] = 0;
+    draw_text_s(buf, BPL_BOX_X + 4, BPL_BOX_Y + 4, 0xFFFF, MENU_SCALE);
+    n = s_cat(buf, 0, "LV");
     n = s_cat_uint(buf, n, b->pl.lv);
     buf[n] = 0;
-    draw_text_s(buf, BPL_BOX_X + 6, BPL_BOX_Y + 4, rgb565(232, 228, 216), MENU_SCALE);
+    draw_text_s(buf, BPL_BOX_X + 4, BPL_BOX_Y + 4 + BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
     n = s_cat(buf, 0, "HP ");
     n = s_cat_uint(buf, n, b->pl.hp);
     n = s_cat(buf, n, "/");
     n = s_cat_uint(buf, n, b->pl.maxHp);
     buf[n] = 0;
-    draw_text_s(buf, BPL_BOX_X + 6, BPL_BOX_Y + 4 + MENU_ROW_H, rgb565(197, 206, 198), MENU_SCALE);
+    draw_text_s(buf, BPL_BOX_X + 4, BPL_BOX_Y + 4 + 2 * BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
 }
 
 static void draw_battle_menu_row(const char *label, int idx, int cur, int y) {
