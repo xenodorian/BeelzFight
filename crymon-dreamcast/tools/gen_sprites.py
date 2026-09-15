@@ -24,11 +24,68 @@
 import os
 import sys
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'src', 'sprites.h')
 KEY = 0xF81F  # magenta
+
+# ----------------------------------------------------------------------
+# Placeholder art: any entity below tagged PLACEHOLDER_ART (grep for it)
+# has no real source art in xenodorian/CryMon yet. Rather than fail the
+# build, open_or_placeholder() synthesizes a "missing texture" PNG (a
+# magenta/black checkerboard with the entity's short tag stamped on it)
+# on first run and caches it under PLACEHOLDER_DIR, at the exact
+# relative path real art would use -- so dropping a real PNG in at that
+# same path (in the CryMon checkout) is a straight replacement, no code
+# changes needed. Every placeholder actually used in a given run is
+# collected into `manifest` and written out as ART_NEEDED.md at the end,
+# so the manifest can never drift out of sync with what's actually
+# missing.
+# ----------------------------------------------------------------------
+PLACEHOLDER_DIR = os.path.join(HERE, 'placeholder_sprites')
+
+
+def _placeholder_font(size):
+    try:
+        return ImageFont.truetype(
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def make_placeholder(w, h, tag):
+    im = Image.new('RGBA', (w, h), (0, 0, 0, 255))
+    d = ImageDraw.Draw(im)
+    cell = max(4, min(w, h) // 8)
+    for y in range(0, h, cell):
+        for x in range(0, w, cell):
+            if ((x // cell) + (y // cell)) % 2 == 0:
+                d.rectangle([x, y, x + cell - 1, y + cell - 1], fill=(255, 0, 255, 255))
+    d.rectangle([0, 0, w - 1, h - 1], outline=(255, 255, 0, 255), width=2)
+    font = _placeholder_font(max(8, min(w, h) // 6))
+    text = tag.upper()
+    try:
+        bbox = d.textbbox((0, 0), text, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except Exception:
+        tw, th = d.textsize(text, font=font)
+    tx, ty = max(0, (w - tw) // 2), max(0, (h - th) // 2)
+    d.rectangle([tx - 2, ty - 2, tx + tw + 2, ty + th + 2], fill=(0, 0, 0, 255))
+    d.text((tx, ty), text, fill=(255, 255, 0, 255), font=font)
+    return im
+
+
+def open_or_placeholder(root, relpath, w, h, tag, manifest, note=''):
+    real = os.path.join(root, relpath)
+    if os.path.exists(real):
+        return Image.open(real)
+    cached = os.path.join(PLACEHOLDER_DIR, relpath)
+    if not os.path.exists(cached):
+        os.makedirs(os.path.dirname(cached), exist_ok=True)
+        make_placeholder(w, h, tag).save(cached)
+    manifest.append((relpath, w, h, tag, note))
+    return Image.open(cached)
 
 PLAYER_DIRS = ['down', 'up', 'left', 'right']
 PLAYER_FRAMES = [1, 2, 3, 4]
@@ -64,6 +121,15 @@ NPCS = {
     'bram':    'npc/bram-%d.png',
     'calder':  'npc/calder-%d.png',
     'shinigami': 'shinigami/down-%d.png',
+    # PLACEHOLDER_ART: no source art in xenodorian/CryMon for these 4 --
+    # the merchant and 3 friendly NPCs added in this pass. Same 4-frame
+    # idle convention as every NPC above; open_or_placeholder() fills
+    # them in with a synthesized "missing texture" tile and records
+    # them in ART_NEEDED.md.
+    'oren':    'npc/oren-%d.png',
+    'tessa':   'npc/tessa-%d.png',
+    'birch':   'npc/birch-%d.png',
+    'sable':   'npc/sable-%d.png',
 }
 NPC_FRAMES = [1, 2, 3, 4]
 
@@ -92,6 +158,13 @@ CATHLEEN_WORLD_W, CATHLEEN_WORLD_H = 28, 28
 MONSTERS = [
     'quillpup', 'glimmoth', 'tortcask', 'razorbat', 'mossback',
     'briarfox', 'fenwisp', 'duskhorn', 'needleroot', 'cathleen', 'crymare',
+    # PLACEHOLDER_ART: the 8 new species added in this pass -- no
+    # source art exists for any of these in xenodorian/CryMon.
+    # open_or_placeholder() fills each in with a synthesized "missing
+    # texture" tile (all 4 battle frames identical) and records them
+    # in ART_NEEDED.md.
+    'emberling', 'frostail', 'boulderam', 'stormwing',
+    'sableclaw', 'thornhide', 'glasswisp', 'ashenmaw',
 ]
 MONSTER_FRAMES = [1, 2, 3, 4]
 MONSTER_W, MONSTER_H = 92, 92
@@ -108,7 +181,11 @@ BATTLE_BG_W, BATTLE_BG_H = 320, 240
 # Bag/shop/battle item-menu icons, one per data.ITEMS entry (id ->
 # items/<id>.png), downscaled to a small square that fits next to a
 # MENU_ROW_H=16 text row.
-ITEM_ICONS = ['salve', 'bandage', 'bitterroot', 'dust', 'gem']
+ITEM_ICONS = [
+    'salve', 'bandage', 'bitterroot', 'dust', 'gem',
+    # PLACEHOLDER_ART: the 4 new items added in this pass.
+    'sunbalm', 'warroot', 'smokebomb', 'greatcrystal',
+]
 ITEM_ICON_W, ITEM_ICON_H = 14, 14
 
 # Dialogue-box character portraits (public/sprites/portraits/<name>.png,
@@ -127,6 +204,8 @@ ITEM_ICON_W, ITEM_ICON_H = 14, 14
 PORTRAITS = [
     'max', 'anne', 'mason', 'wren', 'mae', 'ivo', 'nell', 'pike',
     'calder', 'bram', 'cathleen', 'shinigami',
+    # PLACEHOLDER_ART: portraits for the merchant + 3 friendly NPCs.
+    'oren', 'tessa', 'birch', 'sable',
 ]
 PORTRAIT_BOX_W, PORTRAIT_BOX_H = 312, 176
 
@@ -161,6 +240,7 @@ def main():
     if len(sys.argv) != 2:
         sys.exit('usage: gen_sprites.py <path-to-xenodorian/CryMon-checkout>')
     root = os.path.join(sys.argv[1], 'public', 'sprites')
+    manifest = []  # (relpath, w, h, tag, note) for every placeholder actually used this run
 
     lines = []
     lines.append('/* Generated by tools/gen_sprites.py from xenodorian/CryMon')
@@ -192,7 +272,8 @@ def main():
     lines.append('')
     for name, pattern in NPCS.items():
         for f in NPC_FRAMES:
-            im = Image.open(os.path.join(root, pattern % f))
+            im = open_or_placeholder(root, pattern % f, ACTOR_DST_W, ACTOR_DST_H,
+                                      name, manifest, 'world sprite, idle frame %d/4' % f)
             pixels = encode(im, ACTOR_DST_W, ACTOR_DST_H)
             emit_array(lines, 'npc_%s_%d' % (name, f), pixels, ACTOR_DST_W, ACTOR_DST_H)
 
@@ -215,7 +296,8 @@ def main():
     lines.append('')
     for name in MONSTERS:
         for f in MONSTER_FRAMES:
-            im = Image.open(os.path.join(root, 'monsters', name, '%d.png' % f))
+            im = open_or_placeholder(root, 'monsters/%s/%d.png' % (name, f), MONSTER_W, MONSTER_H,
+                                      name, manifest, 'battle sprite, frame %d/4 (all 4 may be identical)' % f)
             pixels = encode(im, MONSTER_W, MONSTER_H)
             emit_array(lines, 'monster_%s_%d' % (name, f), pixels, MONSTER_W, MONSTER_H)
 
@@ -229,7 +311,8 @@ def main():
     lines.append('#define ITEM_ICON_H %d' % ITEM_ICON_H)
     lines.append('')
     for name in ITEM_ICONS:
-        im = Image.open(os.path.join(root, 'items', '%s.png' % name))
+        im = open_or_placeholder(root, 'items/%s.png' % name, ITEM_ICON_W, ITEM_ICON_H,
+                                  name, manifest, 'bag/shop/battle item icon')
         pixels = encode(im, ITEM_ICON_W, ITEM_ICON_H)
         emit_array(lines, 'icon_%s' % name, pixels, ITEM_ICON_W, ITEM_ICON_H)
 
@@ -237,7 +320,8 @@ def main():
     lines.append('#define PORTRAIT_BOX_H %d' % PORTRAIT_BOX_H)
     lines.append('')
     for name in PORTRAITS:
-        im = Image.open(os.path.join(root, 'portraits', '%s.png' % name))
+        im = open_or_placeholder(root, 'portraits/%s.png' % name, PORTRAIT_BOX_W, PORTRAIT_BOX_H,
+                                  name, manifest, 'dialogue-box portrait')
         sw, sh = im.size
         scale = min(PORTRAIT_BOX_W / sw, PORTRAIT_BOX_H / sh)
         dw, dh = max(1, round(sw * scale)), max(1, round(sh * scale))
@@ -249,6 +333,53 @@ def main():
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
     print('wrote', OUT)
+
+    manifest_path = os.path.join(HERE, '..', 'ART_NEEDED.md')
+    if manifest:
+        md = []
+        md.append('# Art needed\n')
+        md.append(
+            'Auto-generated by `tools/gen_sprites.py` -- every row below is a real\n'
+            'gap: no source art exists for it in `xenodorian/CryMon`, so the game is\n'
+            'currently running a synthesized placeholder (a magenta/black checker\n'
+            'tile with the entity\'s tag stamped on it, cached under\n'
+            '`tools/placeholder_sprites/<path>` at the exact path below). Regenerate\n'
+            'this file any time by re-running `gen_sprites.py` -- it reflects\n'
+            'whatever is actually still missing, never hand-edited.\n'
+        )
+        md.append(
+            '## Instructions for generating replacement art\n\n'
+            '1. Draw/generate a PNG matching the **pixel size** given for each row\n'
+            '   below (or any larger size with the same aspect ratio -- everything\n'
+            '   is downscaled at build time, never upscaled).\n'
+            '2. Style: match the existing CryMon art in `public/sprites/` -- simple,\n'
+            '   readable silhouettes, flat-ish shading, small enough to read at 24-92px\n'
+            '   on screen. Battle sprites (`monsters/<name>/`) are the most detailed;\n'
+            '   world sprites (`npc/<name>-N.png`) and item icons are simpler.\n'
+            '3. Background: fully transparent (alpha channel), not a solid color --\n'
+            '   anything under alpha 128 is treated as see-through at build time.\n'
+            '4. Save the PNG at **exactly** the "expected path" column below, rooted\n'
+            '   at `public/sprites/` inside a checkout of `xenodorian/CryMon` (the\n'
+            '   same repo this port\'s art already comes from). That\'s the only path\n'
+            '   `tools/gen_sprites.py <path-to-CryMon-checkout>` ever looks at --\n'
+            '   dropping a real file there automatically replaces the placeholder\n'
+            '   next time sprites are regenerated, no code changes needed.\n'
+            '5. Monsters and NPCs need one file per frame (1-4); it\'s fine for all 4\n'
+            '   to be pixel-identical at first (no animation) -- a real idle cycle can\n'
+            '   follow later.\n'
+        )
+        md.append('## Missing (%d files)\n' % len(manifest))
+        md.append('| Expected path (under `public/sprites/`) | Size | Entity | Note |')
+        md.append('|---|---|---|---|')
+        for relpath, w, h, tag, note in manifest:
+            md.append('| `%s` | %dx%d | %s | %s |' % (relpath, w, h, tag, note))
+        md.append('')
+        with open(manifest_path, 'w') as f:
+            f.write('\n'.join(md) + '\n')
+        print('wrote %s (%d missing files)' % (manifest_path, len(manifest)))
+    elif os.path.exists(manifest_path):
+        os.remove(manifest_path)
+        print('removed %s (nothing missing)' % manifest_path)
 
 if __name__ == '__main__':
     main()

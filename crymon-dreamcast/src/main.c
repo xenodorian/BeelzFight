@@ -696,6 +696,8 @@ static int pressed(u16 raw, u16 mask) {
 #define MAP_FOREST 2
 #define MAP_GROVE  3
 #define MAP_CAMP   4
+#define MAP_CLIFFS 5
+#define MAP_RUINS  6
 
 typedef struct {
     const char *const *rows;
@@ -725,26 +727,29 @@ static const char *const map_house_rows[] = {
    main N-S corridor onto its own west-branching spur at row 20
    instead of sitting inline directly above the Forest exit ('Z') on
    the exact same column, so the two are visibly two different forks
-   off the same path rather than two doors stacked on one corridor. */
+   off the same path rather than two doors stacked on one corridor.
+   'c' (row 11, east side) is a new exit to MAP_CLIFFS -- Pike's own
+   dialogue already pointed there (TALK_PIKE_DONE's "the cliffs are
+   just rocks"), so this is a real place now instead of just a line. */
 static const char *const map_veld_rows[] = {
     "##############################",
     "####..........RRRR..........##",
-    "##.Q.^^.......HHHH......WWW.##",
+    "##.Q.^^.......rrrr......WWW.##",
     "##............HDH......WWA..##",
     "##..K.........===...I...W....#",
     "##...TTT.....=====.....TTT..G#",
     "##...TTT....===,===....TTT...#",
     "##....M......=====....**.....#",
     "##.V.TTT......===......TTT...#",
-    "##.HHH........===.......HHH..#",
+    "##.rrr........===.......rrr..#",
     "###HHH.X...J.=====......HHH..#",
-    "##...TTT......===............#",
+    "##...TTT......===...........c#",
     "##............===.......L....#",
     "##...TTT.....=====......TTT..#",
-    "##............===.HHH..^^....#",
+    "##............===.rrr..^^....#",
     "##....TTT....=====HHH...TTT..#",
     "##....TTT.....===......TTT...#",
-    "##HHH.........===............#",
+    "##rrr.........===............#",
     "##HHH........=====.....NNNN..#",
     "##............===.......NE...#",
     "##......F========............#",
@@ -775,10 +780,16 @@ static const char *const map_forest_rows[] = {
     "#############=O=##########",
 };
 
+/* Mark 'K' (near the entrance) is Warden Cross, a Weeping Army soldier
+   assigned to watch the Grove -- see TALK_WSOLDIER_GROVE_SPOT. Mark
+   'g' (south, past where Shinigami stood) is the new exit to
+   MAP_RUINS, gated on beat_shin in tile_blocked() the same way VELD's
+   'F' is gated on beat_calder: the cage that kept him is what was
+   blocking the way further south, so it only opens once he's gone. */
 static const char *const map_grove_rows[] = {
     "##########################",
     "####.........O.........###",
-    "###.........===.........##",
+    "###..K......===.........##",
     "##..........===.........##",
     "##.........=====........##",
     "##..........===.........##",
@@ -795,7 +806,7 @@ static const char *const map_grove_rows[] = {
     "##.........=====........##",
     "##..........===.........##",
     "##...........9..........##",
-    "###....................###",
+    "###..........g.........###",
     "##########################",
 };
 
@@ -810,10 +821,13 @@ static const char *const map_grove_rows[] = {
    'I', reusing the soldier sprite -- there's no dedicated commander
    art) is a taunt and a redirect toward the Grove, not an ending --
    see its trigger site further down. */
+/* Marks 'K'/'A': two more Weeping Army soldiers, filling the camp out
+   to its own 3-interactable minimum (it was just the commander
+   before) -- see TALK_WSOLDIER_CAMP1/2_SPOT. */
 static const char *const map_camp_rows[] = {
     "################",
     "#######D########",
-    "#..............#",
+    "#.....K..A.....#",
     "#..H........H..#",
     "#..H........H..#",
     "#..............#",
@@ -823,12 +837,53 @@ static const char *const map_camp_rows[] = {
     "################",
 };
 
-static const Map MAPS[5] = {
+/* The Cliffs -- reached from VELD (Pike's own dialogue already
+   pointed here: "THE CLIFFS ARE JUST ROCKS", TALK_PIKE_DONE). Mark
+   'V' is a Weeping Army sentry (TALK_WSOLDIER_CLIFFS_SPOT), 'Y' is
+   Tessa (a friendly NPC), 'C' is a treasure chest (TALK_CHEST). */
+static const char *const map_cliffs_rows[] = {
+    "##################",
+    "#........D.......#",
+    "#................#",
+    "#.TTT........TTT.#",
+    "#.TTT........TTT.#",
+    "#...V........Y...#",
+    "#................#",
+    "#.TTT........TTT.#",
+    "#.TTT....C...TTT.#",
+    "#................#",
+    "#................#",
+    "##################",
+};
+
+/* The Ruins -- reached from GROVE, only once Shinigami is gone
+   (beat_shin gates the 'g' tile on GROVE, tile_blocked()). Mark 'J'
+   is Oren (a merchant, reuses the same shop UI as Bram's stall), 'K'
+   is Birch and 'A' is Sable (both friendly NPCs). */
+static const char *const map_ruins_rows[] = {
+    "####################",
+    "#.........D........#",
+    "#..................#",
+    "#..R............R..#",
+    "#..R............R..#",
+    "#..................#",
+    "#....J........K....#",
+    "#..................#",
+    "#..R............R..#",
+    "#..R......A.....R..#",
+    "#..................#",
+    "#..................#",
+    "####################",
+};
+
+static const Map MAPS[7] = {
     { map_house_rows,  14, 11 },
     { map_veld_rows,   30, 23 },
     { map_forest_rows, 26, 20 },
     { map_grove_rows,  26, 21 },
     { map_camp_rows,   16, 10 },
+    { map_cliffs_rows, 18, 12 },
+    { map_ruins_rows,  20, 13 },
 };
 
 /* data.lua's own SOLID_SET is "#HWRBC^NKEVAQXUJI" -- extended here so
@@ -842,7 +897,7 @@ static const Map MAPS[5] = {
    proximity (near_mark/closest_mark), never by standing on the exact
    tile, so making these solid doesn't block reaching them. */
 static int tile_is_solid(char ch) {
-    static const char *const solid = "#HWRBC^NKEVAQXUJISMGL89";
+    static const char *const solid = "#HWRBC^NKEVAQXUJISMGL89r";
     const char *p;
     for(p = solid; *p; p++)
         if(*p == ch)
@@ -860,10 +915,13 @@ static int tile_is_solid(char ch) {
    not (both call sites below OR beat_cathleen into the cath_caught
    param), so the 3rd param here still just means "the key is hers to
    give" regardless of which flag actually earned it. */
-static int tile_blocked(int map_id, char ch, int cath_caught, int beat_calder) {
+static int tile_blocked(int map_id, char ch, int cath_caught, int beat_calder, int beat_shin) {
     if(tile_is_solid(ch)) return 1;
     if(map_id == MAP_GROVE && ch == 'D' && !cath_caught) return 1;
     if(map_id == MAP_VELD && ch == 'F' && !beat_calder) return 1;
+    /* 'g': the way south past where Shinigami stood, to MAP_RUINS --
+       only open once he's gone (see map_grove_rows' own comment). */
+    if(map_id == MAP_GROVE && ch == 'g' && !beat_shin) return 1;
     return 0;
 }
 
@@ -913,6 +971,15 @@ static void draw_tile(char ch, int dx, int dy) {
     switch(ch) {
         case 'H':
             fill_rect(dx, dy, t, t, rgb565(42, 30, 22));
+            return;
+        case 'r':
+            /* Roof cap: the top row of every real house block (Max's
+               own on VELD, the decorative houses, and any new-map
+               houses) is this instead of a second 'H' row now, so
+               a house reads as a peaked roof over a wall instead of
+               a flat two-tone block. Lowercase since every uppercase
+               letter is already spoken for by an existing tile/mark. */
+            fill_rect(dx, dy, t, t, rgb565(96, 40, 32));
             return;
         case 'R':
             fill_rect(dx, dy, t, t, rgb565(106, 64, 48));
@@ -1156,6 +1223,12 @@ static const u16 *const PIKE_FRAMES[4]   = { npc_pike_1, npc_pike_2, npc_pike_3,
 static const u16 *const BRAM_FRAMES[4]   = { npc_bram_1, npc_bram_2, npc_bram_3, npc_bram_4 };
 static const u16 *const CALDER_FRAMES[4] = { npc_calder_1, npc_calder_2, npc_calder_3, npc_calder_4 };
 static const u16 *const SHINIGAMI_FRAMES[4] = { npc_shinigami_1, npc_shinigami_2, npc_shinigami_3, npc_shinigami_4 };
+/* PLACEHOLDER_ART below (Oren/Tessa/Birch/Sable) -- see NPCS in
+   tools/gen_sprites.py and ART_NEEDED.md. */
+static const u16 *const OREN_FRAMES[4]  = { npc_oren_1, npc_oren_2, npc_oren_3, npc_oren_4 };
+static const u16 *const TESSA_FRAMES[4] = { npc_tessa_1, npc_tessa_2, npc_tessa_3, npc_tessa_4 };
+static const u16 *const BIRCH_FRAMES[4] = { npc_birch_1, npc_birch_2, npc_birch_3, npc_birch_4 };
+static const u16 *const SABLE_FRAMES[4] = { npc_sable_1, npc_sable_2, npc_sable_3, npc_sable_4 };
 
 static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
                           int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
@@ -1186,11 +1259,30 @@ static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
             ws_push_mark_idle(list, n, map_id, '9', SHINIGAMI_FRAMES, frame_count, 20, NPC_SPRITE_W, NPC_SPRITE_H);
         if(!cath_caught)
             ws_push_mark(list, n, map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H);
+        /* Warden Cross, a Weeping Army soldier -- reuses the generic
+           standing-soldier sprite, same as the camp officer below. */
+        ws_push_mark(list, n, map_id, 'K', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
     }
     else if(map_id == MAP_CAMP) {
         /* No dedicated commander art -- reuses the soldier sprite
-           (down-facing, standing) since he's a camp officer too. */
+           (down-facing, standing) since he's a camp officer too. Same
+           for the 2 rank-and-file soldiers added at 'K'/'A'. */
         ws_push_mark(list, n, map_id, 'I', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark(list, n, map_id, 'K', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark(list, n, map_id, 'A', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
+    }
+    else if(map_id == MAP_CLIFFS) {
+        ws_push_mark(list, n, map_id, 'V', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'Y', TESSA_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        /* Treasure chest: reuses the existing crate prop art rather
+           than needing new placeholder art -- close enough visually
+           (a wooden storage box) that it doesn't need its own tag. */
+        ws_push_mark(list, n, map_id, 'C', prop_crate, PROP_CRATE_W, PROP_CRATE_H);
+    }
+    else if(map_id == MAP_RUINS) {
+        ws_push_mark_idle(list, n, map_id, 'J', OREN_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'K', BIRCH_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'A', SABLE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
     }
 
     /* Anne isn't tied to one map like the stationary VELD NPCs --
@@ -1276,6 +1368,12 @@ typedef struct {
 #define SPK_BRAM      10
 #define SPK_CATHLEEN  11
 #define SPK_SHINIGAMI 12
+/* PLACEHOLDER_ART: no portrait art for these 4 (the merchant + 3
+   friendly NPCs) -- see tools/gen_sprites.py's PORTRAITS list. */
+#define SPK_OREN      13
+#define SPK_TESSA     14
+#define SPK_BIRCH     15
+#define SPK_SABLE     16
 
 /* Each portrait keeps its source art's own aspect ratio (gen_sprites.py
    scales every one by the same factor on both axes to fill as much of
@@ -1288,7 +1386,7 @@ typedef struct {
     int w, h;
 } Portrait;
 
-static const Portrait SPEAKER_PORTRAIT[13] = {
+static const Portrait SPEAKER_PORTRAIT[17] = {
     { 0, 0, 0 }, /* SPK_NONE */
     { port_max,       PORT_MAX_W,       PORT_MAX_H },
     { port_anne,      PORT_ANNE_W,      PORT_ANNE_H },
@@ -1302,6 +1400,12 @@ static const Portrait SPEAKER_PORTRAIT[13] = {
     { port_bram,      PORT_BRAM_W,      PORT_BRAM_H },
     { port_cathleen,  PORT_CATHLEEN_W,  PORT_CATHLEEN_H },
     { port_shinigami, PORT_SHINIGAMI_W, PORT_SHINIGAMI_H },
+    /* PLACEHOLDER_ART below (SPK_OREN..SPK_SABLE) -- see the #define
+       block above. */
+    { port_oren,      PORT_OREN_W,      PORT_OREN_H },
+    { port_tessa,     PORT_TESSA_W,     PORT_TESSA_H },
+    { port_birch,     PORT_BIRCH_W,     PORT_BIRCH_H },
+    { port_sable,     PORT_SABLE_W,     PORT_SABLE_H },
 };
 
 /* The game's very first dialogue -- carries the CryMon = Crystal
@@ -1565,6 +1669,100 @@ static const TalkBeat TALK_BRAM_OPEN[] = {
     { "MARKS FOR MOSS, WRAPS, STONES. BUY OR SELL.", SPK_BRAM },
     { "I HAVE CUTS. I NEED STONES.", SPK_MAX },
 };
+
+/* ----------------------------------------------------------------------
+ * The 4 new Weeping Army soldiers (Cliffs/Camp x2/Grove) and the 4
+ * new NPCs (Oren the merchant, Tessa/Birch/Sable the friendly ones) --
+ * see MAP_CLIFFS/MAP_RUINS, MAP_GROVE and MAP_CAMP's own comments for
+ * where each one stands. Every soldier gets a real opening line and a
+ * response from Max before the fight, each pulling on a different
+ * thread of who the Weeping Army actually is (scorched-earth tactics,
+ * forced conscription, plain cruelty, and -- tying directly back to
+ * the main plot -- why they wanted Shinigami's necromancy in the
+ * first place) instead of one generic "you there" line repeated 4
+ * times. All 4 use the same bench-of-2 multi-CryMon pattern Shinigami
+ * and Mason's rematch already use, at increasing levels.
+ * ---------------------------------------------------------------------- */
+static const TalkBeat TALK_WSOLDIER_CLIFFS_SPOT[] = {
+    { "A WEEPING ARMY SENTRY BLOCKS THE ROCKS.", SPK_NONE },
+    { "NOTHING UP HERE BUT WIND AND A DEAD MAN'S CRYMON.", SPK_NONE },
+    { "WE BURN THE FIELDS SO CRYTOWN STARVES BEFORE IT FIGHTS BACK.", SPK_NONE },
+    { "YOU'RE MONSTERS.", SPK_MAX },
+    { "WE'RE WINNING. THAT'S ALL WE ARE.", SPK_NONE },
+};
+static const TalkBeat TALK_WSOLDIER_CLIFFS_WIN[] = {
+    { "THE SENTRY GOES DOWN HARD. THE CLIFFS ARE QUIET.", SPK_NONE },
+};
+static const TalkBeat TALK_WSOLDIER_CAMP1_SPOT[] = {
+    { "DON'T. PLEASE. THEY'LL WHIP ME IF I LET YOU PAST.", SPK_NONE },
+    { "THEY MADE YOU DO THIS?", SPK_MAX },
+    { "THEY TOOK MY VILLAGE FIRST. THEN THEY TOOK ME.", SPK_NONE },
+    { "I'M SORRY. I STILL HAVE TO FIGHT YOU.", SPK_MAX },
+};
+static const TalkBeat TALK_WSOLDIER_CAMP1_WIN[] = {
+    { "THE CONSCRIPT SLUMPS, ALMOST RELIEVED TO LOSE.", SPK_NONE },
+};
+static const TalkBeat TALK_WSOLDIER_CAMP2_SPOT[] = {
+    { "ANOTHER RAT FROM CRYTOWN. GOOD. I WAS BORED.", SPK_NONE },
+    { "I DON'T WANT TO FIGHT YOU.", SPK_MAX },
+    { "NOBODY EVER DOES. THAT'S WHY IT'S FUN.", SPK_NONE },
+};
+static const TalkBeat TALK_WSOLDIER_CAMP2_WIN[] = {
+    { "THE ENFORCER SPITS TEETH AND A CURSE. HE DOESN'T GET UP.", SPK_NONE },
+};
+static const TalkBeat TALK_WSOLDIER_GROVE_SPOT[] = {
+    { "WARDEN CROSS. THE WEEPING ARMY POSTED ME HERE FOR A REASON.", SPK_NONE },
+    { "TO GUARD A PRISONER?", SPK_MAX },
+    { "TO GUARD A WEAPON. THE GENERALS WANTED HIS NECROMANCY.", SPK_NONE },
+    { "FOR THE FRONT LINE.", SPK_NONE },
+    { "AN ARMY OF THE DEAD, IF HE'D EVER COOPERATED.", SPK_NONE },
+    { "HE DIDN'T. NOW HE NEVER WILL.", SPK_MAX },
+};
+static const TalkBeat TALK_WSOLDIER_GROVE_WIN[] = {
+    { "CROSS FALLS. WHATEVER HE WAS GUARDING IS ALREADY GONE.", SPK_NONE },
+};
+
+static const TalkBeat TALK_OREN_OPEN[] = {
+    { "MARKS FOR WHATEVER SURVIVED THE RUINS. BUY OR SELL.", SPK_OREN },
+    { "WHAT HAPPENED HERE?", SPK_MAX },
+    { "THE WEEPING ARMY DID. I SELL WHAT THEY LEFT BEHIND.", SPK_OREN },
+};
+static const TalkBeat TALK_TESSA_FIRST[] = {
+    { "YOU FOUGHT THROUGH THE SENTRY? THAT'S MORE THAN MOST MANAGE.", SPK_TESSA },
+    { "I HAD TO.", SPK_MAX },
+    { "THE WEEPING ARMY WATCHES THESE CLIFFS FOR SHIPS. MORE OF THEM ARE COMING.", SPK_TESSA },
+    { "TAKE THIS. YOU'LL NEED IT MORE THAN I WILL.", SPK_TESSA },
+    { "TESSA PRESSES A GREATER CRYSTAL INTO MAX'S HAND.", SPK_NONE },
+};
+static const TalkBeat TALK_TESSA_AGAIN[] = {
+    { "STILL WATCHING THE WATER. STILL NOTHING GOOD OUT THERE.", SPK_TESSA },
+};
+static const TalkBeat TALK_BIRCH_FIRST[] = {
+    { "YOU CAME FROM THE GROVE? THEN SHINIGAMI'S REALLY GONE.", SPK_BIRCH },
+    { "HE IS.", SPK_MAX },
+    { "GOOD. TAKE THIS, FOR SURVIVING HIM.", SPK_BIRCH },
+    { "BIRCH PRESSES A SUNBALM INTO MAX'S HAND.", SPK_NONE },
+};
+static const TalkBeat TALK_BIRCH_AGAIN[] = {
+    { "THE RUINS DON'T CHANGE MUCH. STILL STANDING, I SEE.", SPK_BIRCH },
+};
+static const TalkBeat TALK_SABLE_FIRST[] = {
+    { "THE WEEPING ARMY CALLS THIS PLACE DEAD GROUND. THEY'RE NOT WRONG.", SPK_SABLE },
+    { "WHY STAY?", SPK_MAX },
+    { "SOMEONE HAS TO REMEMBER WHAT STOOD HERE BEFORE THEM. TAKE THIS.", SPK_SABLE },
+    { "SABLE PRESSES A WARROOT INTO MAX'S PALM.", SPK_NONE },
+};
+static const TalkBeat TALK_SABLE_AGAIN[] = {
+    { "STILL REMEMBERING. STILL HERE.", SPK_SABLE },
+};
+static const TalkBeat TALK_CHEST[] = {
+    { "A CHEST WEDGED BETWEEN THE ROCKS.", SPK_MAX },
+    { "INSIDE: MARKS, AND A HANDFUL OF SUPPLIES.", SPK_NONE },
+};
+static const TalkBeat TALK_CHEST_EMPTY[] = {
+    { "JUST SPLINTERS NOW. ALREADY EMPTIED.", SPK_MAX },
+};
+
 /* data.TALK.anneGift/anneAgain: Anne is reachable after all -- see the
    world-NPC section comment further down for the correction (the
    canonical src/game/engine.ts calls maybeStartAnne(); only the Lua
@@ -1684,8 +1882,9 @@ static void draw_hud_toast(const char *text) {
 #define MAP_BANNER_OUT   16
 #define MAP_BANNER_TOTAL (MAP_BANNER_IN + MAP_BANNER_HOLD + MAP_BANNER_OUT)
 
-static const char *const MAP_DISPLAY_NAME[5] = {
-    "HOME", "CRYTOWN", "THE FOREST", "THE GROVE", "WEEPING ARMY CAMP"
+static const char *const MAP_DISPLAY_NAME[7] = {
+    "HOME", "CRYTOWN", "THE FOREST", "THE GROVE", "WEEPING ARMY CAMP",
+    "THE CLIFFS", "THE RUINS"
 };
 
 static void draw_map_banner(int map_id, int timer) {
@@ -1760,8 +1959,19 @@ typedef struct {
 #define SP_NEEDLEROOT 8
 #define SP_CATHLEEN   9
 #define SP_CRYMARE    10
+/* PLACEHOLDER_ART: the 8 species below (SP_EMBERLING..SP_ASHENMAW)
+   have no real battle sprite yet -- see tools/gen_sprites.py's
+   MONSTERS list and ART_NEEDED.md. */
+#define SP_EMBERLING  11
+#define SP_FROSTAIL   12
+#define SP_BOULDERAM  13
+#define SP_STORMWING  14
+#define SP_SABLECLAW  15
+#define SP_THORNHIDE  16
+#define SP_GLASSWISP  17
+#define SP_ASHENMAW   18
 
-static const Species SPECIES[11] = {
+static const Species SPECIES[19] = {
     /* name          basic       special         maxHp str agl spc spp  spells_n  spells (0=firebolt,1=icebeam,2=lightning,3=manasurge) */
     { "QUILLPUP",   "NIP",       "QUILLBURST",   34, 15, 10, 7,  3, 0, {0,0,0,0} },
     { "GLIMMOTH",   "DUSTWING",  "LAMPFLARE",    26, 7,  13, 16, 3, 0, {0,0,0,0} },
@@ -1774,6 +1984,16 @@ static const Species SPECIES[11] = {
     { "NEEDLEROOT", "PRICK",     "SAPDRAIN",     32, 12, 7,  14, 3, 0, {0,0,0,0} },
     { "CATHLEEN",   "FIRE BOLT", "MANA SURGE",   38, 11, 13, 19, 4, 4, {0,1,2,3} },
     { "CRYMARE",    "WAIL",      "NIGHTBRIDLE",  30, 9,  14, 18, 3, 0, {0,0,0,0} },
+    /* PLACEHOLDER_ART below (SP_EMBERLING..SP_ASHENMAW) -- see the
+       #define block above. */
+    { "EMBERLING",  "SPARK",     "EMBERBLAZE",   28, 14, 15, 12, 3, 0, {0,0,0,0} },
+    { "FROSTAIL",   "CHILL",     "FROSTFANG",    32, 12, 11, 15, 3, 0, {0,0,0,0} },
+    { "BOULDERAM",  "RAM",       "STONESLAM",    46, 17, 4,  6,  3, 0, {0,0,0,0} },
+    { "STORMWING",  "GUST",      "THUNDERDIVE",  26, 10, 19, 13, 3, 0, {0,0,0,0} },
+    { "SABLECLAW",  "SLASH",     "SHADOWRIP",    30, 16, 13, 9,  3, 0, {0,0,0,0} },
+    { "THORNHIDE",  "BARB",      "THORNWALL",    40, 11, 6,  10, 3, 0, {0,0,0,0} },
+    { "GLASSWISP",  "CHIME",     "PRISMFLARE",   22, 6,  14, 18, 3, 0, {0,0,0,0} },
+    { "ASHENMAW",   "BITE",      "ASHENROAR",    34, 18, 12, 11, 3, 0, {0,0,0,0} },
 };
 
 typedef struct {
@@ -1917,6 +2137,7 @@ static int capture_chance(int agl, int hp, int max_hp, int vulnerable) {
  * ---------------------------------------------------------------------- */
 typedef struct {
     int salve, bandage, bitterroot, dust, gem;
+    int sunbalm, warroot, smokebomb, greatcrystal; /* the 4 new items */
 } Bag;
 
 #define MENU_X 20
@@ -1940,16 +2161,21 @@ static void draw_menu_frame(const char *title, const char *footer) {
    bag, shop, and battle item-menu rows below, all of which previously
    showed items as bare text. icon may be null (the item-menu's "PASS"
    row has no matching icon). */
-static const u16 *const ITEM_ICONS[5] = {
-    icon_salve, icon_bandage, icon_bitterroot, icon_dust, icon_gem
+/* PLACEHOLDER_ART: icon_sunbalm/warroot/smokebomb/greatcrystal have no
+   real source art -- see tools/gen_sprites.py's ITEM_ICONS list and
+   ART_NEEDED.md. */
+static const u16 *const ITEM_ICONS[9] = {
+    icon_salve, icon_bandage, icon_bitterroot, icon_dust, icon_gem,
+    icon_sunbalm, icon_warroot, icon_smokebomb, icon_greatcrystal
 };
 
 /* Effect text is stripped out of the row's own title now (matching
    the battle item menu below) and only drawn when the row is the one
    under the cursor, so the list reads as plain item names/counts
    until the player actually navigates onto one. */
-static const char *const ITEM_EFFECT_DESC[5] = {
-    "+22 HP", "+12 HP", "STR+4", "-3/-2/-2", "CATCH"
+static const char *const ITEM_EFFECT_DESC[9] = {
+    "+22 HP", "+12 HP", "STR+4", "-3/-2/-2", "CATCH",
+    "+40 HP", "AGL+4", "FLEE", "CATCH+"
 };
 
 static void draw_bag_row(const u16 *icon, const char *label, int count,
@@ -1990,7 +2216,11 @@ static void draw_bag_menu(const Bag *bag, int marks, int cur) {
     draw_bag_row(icon_bandage, "LINEN WRAP", bag->bandage, 1, cur, y);        y += MENU_ROW_H;
     draw_bag_row(icon_bitterroot, "BITTERROOT", bag->bitterroot, 2, cur, y);  y += MENU_ROW_H;
     draw_bag_row(icon_dust, "ASH DUST", bag->dust, 3, cur, y);                y += MENU_ROW_H;
-    draw_bag_row(icon_gem, "CAPTURE CRYSTAL", bag->gem, 4, cur, y);
+    draw_bag_row(icon_gem, "CAPTURE CRYSTAL", bag->gem, 4, cur, y);          y += MENU_ROW_H;
+    draw_bag_row(icon_sunbalm, "SUNBALM", bag->sunbalm, 5, cur, y);          y += MENU_ROW_H;
+    draw_bag_row(icon_warroot, "WARROOT", bag->warroot, 6, cur, y);          y += MENU_ROW_H;
+    draw_bag_row(icon_smokebomb, "SMOKE BOMB", bag->smokebomb, 7, cur, y);   y += MENU_ROW_H;
+    draw_bag_row(icon_greatcrystal, "GREATER CRYSTAL", bag->greatcrystal, 8, cur, y);
 }
 
 /* drawParty(): lists every party member (up to data.PARTY_MAX -- see
@@ -2068,11 +2298,11 @@ static void draw_party_detail(const Monster *party, int party_n, int idx) {
 
 }
 
-/* heal_item selects who a salve/wrap picked from the bag menu goes to
-   (0 salve, 1 wrap, -1 not healing) -- same list as the plain party
-   menu, just with a different title/footer and A applying the item
-   to party_cur instead of setting the lead (see main()'s menu_mode==2
-   input handling). */
+/* heal_item selects who a salve/wrap/sunbalm picked from the bag menu
+   goes to (0 salve, 1 wrap, 5 sunbalm, -1 not healing) -- same list as
+   the plain party menu, just with a different title/footer and A
+   applying the item to party_cur instead of setting the lead (see
+   main()'s menu_mode==2 input handling). */
 static void draw_party_menu(const Monster *party, int party_n, int lead, int party_cur,
                              int party_detail, int heal_item) {
     int y = MENU_Y + 24;
@@ -2082,9 +2312,12 @@ static void draw_party_menu(const Monster *party, int party_n, int lead, int par
         return;
     }
 
-    if(heal_item >= 0)
-        draw_menu_frame(heal_item == 0 ? "USE MOSS SALVE ON WHO?" : "USE LINEN WRAP ON WHO?",
-                         "A HEAL  B CANCEL");
+    if(heal_item >= 0) {
+        const char *title = heal_item == 0 ? "USE MOSS SALVE ON WHO?"
+                           : heal_item == 1 ? "USE LINEN WRAP ON WHO?"
+                                             : "USE SUNBALM ON WHO?";
+        draw_menu_frame(title, "A HEAL  B CANCEL");
+    }
     else
         draw_menu_frame("CRYMON", "B CLOSE");
 
@@ -2195,6 +2428,10 @@ typedef struct {
 #define TRAINER_SHINIGAMI 3
 #define TRAINER_CALDER   4
 #define TRAINER_MASON2   5
+#define TRAINER_WSOLDIER_CLIFFS 6
+#define TRAINER_WSOLDIER_CAMP1  7
+#define TRAINER_WSOLDIER_CAMP2  8
+#define TRAINER_WSOLDIER_GROVE  9
 
 #define BAFTER_ITEM      1
 #define BAFTER_ATK       2
@@ -2622,6 +2859,10 @@ guard_chance:
 #define ITEM_BITTERROOT 3
 #define ITEM_DUST       4
 #define ITEM_GEM        5
+#define ITEM_SUNBALM      6
+#define ITEM_WARROOT      7
+#define ITEM_SMOKEBOMB    8
+#define ITEM_GREATCRYSTAL 9
 
 /* pickItem(): items (heal/buff/debuff) are "free" -- they route back
    to the attack menu (BAFTER_ATK), never to the guard phase, matching
@@ -2699,6 +2940,63 @@ static void battle_pick_item(Battle *b, Bag *bag, int kind,
             n = s_cat(b->msg[0], 0, "THE CRYSTAL CRACKS DARK IT SLIPS FREE");
         }
     }
+    else if(kind == ITEM_SUNBALM && bag->sunbalm > 0) {
+        int heal = b->pl.maxHp - b->pl.hp;
+        if(heal > 40) heal = 40;
+        bag->sunbalm--;
+        b->pl.hp += heal;
+        n = s_cat(b->msg[0], 0, "SUNBALM ");
+        n = s_cat_uint(b->msg[0], n, heal);
+        n = s_cat(b->msg[0], n, " HP");
+    }
+    else if(kind == ITEM_WARROOT && bag->warroot > 0) {
+        bag->warroot--;
+        b->mods_self_agl += 4;
+        n = s_cat(b->msg[0], 0, "WARROOT AGL+4 THIS FIGHT");
+    }
+    else if(kind == ITEM_SMOKEBOMB && bag->smokebomb > 0) {
+        if(!b->wild) {
+            n = s_cat(b->msg[0], 0, "CANNOT FLEE A TAMER'S FIGHT");
+        }
+        else {
+            bag->smokebomb--;
+            n = s_cat(b->msg[0], 0, "SMOKE BOMB MAX SLIPS AWAY");
+            b->msg[0][n] = 0;
+            b->msg_n = 1; b->msg_i = 0; b->phase = 0; b->after = BAFTER_WORLD;
+            party[lead] = b->pl;
+            return;
+        }
+    }
+    else if(kind == ITEM_GREATCRYSTAL && bag->greatcrystal > 0) {
+        bag->greatcrystal--;
+        if(!b->wild) {
+            bag->greatcrystal++;
+            n = s_cat(b->msg[0], 0, "CRYSTALS WILL NOT TAKE A TAMERS CRYMON");
+        }
+        else if(*party_n >= 6) {
+            bag->greatcrystal++;
+            n = s_cat(b->msg[0], 0, "SIX IS ALL MAX CAN HOLD");
+        }
+        else {
+            int chance = battle_capture_chance(b) + 25;
+            if(chance > 100) chance = 100;
+            if(irand(1, 100) <= chance) {
+                Monster c = b->foe;
+                c.hp = c.maxHp * 2 / 5;
+                if(c.hp < 1) c.hp = 1;
+                party[*party_n] = c;
+                (*party_n)++;
+                n = s_cat(b->msg[0], 0, "THE GREATER CRYSTAL TAKES ");
+                n = s_cat(b->msg[0], n, SPECIES[c.species].name);
+                n = s_cat(b->msg[0], n, " IS YOURS");
+                b->msg[0][n] = 0;
+                b->msg_n = 1; b->msg_i = 0; b->phase = 0; b->after = BAFTER_WORLD;
+                party[lead] = b->pl;
+                return;
+            }
+            n = s_cat(b->msg[0], 0, "THE GREATER CRYSTAL CRACKS DARK IT SLIPS FREE");
+        }
+    }
     else {
         n = s_cat(b->msg[0], 0, "NOTHING HAPPENS");
     }
@@ -2739,6 +3037,8 @@ static int try_encounter(int map_id, int px, int py, int party_n,
                           int *enc_lock, int *last_tx, int *last_ty,
                           Battle *out) {
     static const int forest_pool[3] = { SP_FENWISP, SP_DUSKHORN, SP_NEEDLEROOT };
+    static const int cliffs_pool[6] = { SP_STORMWING, SP_SABLECLAW, SP_FROSTAIL,
+                                         SP_BOULDERAM, SP_THORNHIDE, SP_GLASSWISP };
     int tx = px / TILE, ty = py / TILE;
     int id, lv, n;
 
@@ -2756,10 +3056,20 @@ static int try_encounter(int map_id, int px, int py, int party_n,
         id = forest_pool[irand(0, 2)];
         lv = 3 + irand(0, 2);
     }
+    else if(map_id == MAP_CLIFFS) {
+        id = cliffs_pool[irand(0, 5)];
+        lv = 5 + irand(0, 2);
+    }
     else {
-        if(tx < 12) id = SP_GLIMMOTH;
-        else if(tx > 18) id = SP_TORTCASK;
-        else id = irand(0, 1) == 0 ? SP_GLIMMOTH : SP_TORTCASK;
+        /* VELD's tall grass -- EMBERLING/ASHENMAW mixed in alongside
+           the original GLIMMOTH/TORTCASK split (1-in-4 each) so both
+           are reachable as wild encounters too, not just as the new
+           Weeping Army soldiers' fixed rosters. */
+        int roll = irand(0, 3);
+        if(roll == 0) id = SP_GLIMMOTH;
+        else if(roll == 1) id = SP_TORTCASK;
+        else if(roll == 2) id = SP_EMBERLING;
+        else id = SP_ASHENMAW;
         lv = 2 + (ty > 14 ? 1 : 0) + irand(0, 1);
     }
 
@@ -2852,7 +3162,7 @@ static int try_encounter(int map_id, int px, int py, int party_n,
    "Max's CryMon" (the player's own active monster; Max herself
    already has her own walk sprite on the world map, so this is what
    "the player's battle sprite" actually means in this game). */
-static const u16 *const MONSTER_SPRITES[11][4] = {
+static const u16 *const MONSTER_SPRITES[19][4] = {
     { monster_quillpup_1, monster_quillpup_2, monster_quillpup_3, monster_quillpup_4 },
     { monster_glimmoth_1, monster_glimmoth_2, monster_glimmoth_3, monster_glimmoth_4 },
     { monster_tortcask_1, monster_tortcask_2, monster_tortcask_3, monster_tortcask_4 },
@@ -2864,6 +3174,15 @@ static const u16 *const MONSTER_SPRITES[11][4] = {
     { monster_needleroot_1, monster_needleroot_2, monster_needleroot_3, monster_needleroot_4 },
     { monster_cathleen_1, monster_cathleen_2, monster_cathleen_3, monster_cathleen_4 },
     { monster_crymare_1, monster_crymare_2, monster_crymare_3, monster_crymare_4 },
+    /* PLACEHOLDER_ART below (SP_EMBERLING..SP_ASHENMAW) -- see SPECIES. */
+    { monster_emberling_1, monster_emberling_2, monster_emberling_3, monster_emberling_4 },
+    { monster_frostail_1, monster_frostail_2, monster_frostail_3, monster_frostail_4 },
+    { monster_boulderam_1, monster_boulderam_2, monster_boulderam_3, monster_boulderam_4 },
+    { monster_stormwing_1, monster_stormwing_2, monster_stormwing_3, monster_stormwing_4 },
+    { monster_sableclaw_1, monster_sableclaw_2, monster_sableclaw_3, monster_sableclaw_4 },
+    { monster_thornhide_1, monster_thornhide_2, monster_thornhide_3, monster_thornhide_4 },
+    { monster_glasswisp_1, monster_glasswisp_2, monster_glasswisp_3, monster_glasswisp_4 },
+    { monster_ashenmaw_1, monster_ashenmaw_2, monster_ashenmaw_3, monster_ashenmaw_4 },
 };
 
 /* Idle-animated like the stationary world NPCs (drawBattle()'s own
@@ -2974,17 +3293,25 @@ static int battle_item_menu_count(const Bag *bag) {
     if(bag->bitterroot > 0) n++;
     if(bag->dust > 0) n++;
     if(bag->gem > 0) n++;
+    if(bag->sunbalm > 0) n++;
+    if(bag->warroot > 0) n++;
+    if(bag->smokebomb > 0) n++;
+    if(bag->greatcrystal > 0) n++;
     return n;
 }
 
 static int battle_item_menu_kind(const Bag *bag, int idx) {
     int i = 0;
     if(idx == i++) return ITEM_PASS;
-    if(bag->salve > 0)      { if(idx == i++) return ITEM_SALVE; }
-    if(bag->bandage > 0)    { if(idx == i++) return ITEM_BANDAGE; }
-    if(bag->bitterroot > 0) { if(idx == i++) return ITEM_BITTERROOT; }
-    if(bag->dust > 0)       { if(idx == i++) return ITEM_DUST; }
-    if(bag->gem > 0)        { if(idx == i++) return ITEM_GEM; }
+    if(bag->salve > 0)        { if(idx == i++) return ITEM_SALVE; }
+    if(bag->bandage > 0)      { if(idx == i++) return ITEM_BANDAGE; }
+    if(bag->bitterroot > 0)   { if(idx == i++) return ITEM_BITTERROOT; }
+    if(bag->dust > 0)         { if(idx == i++) return ITEM_DUST; }
+    if(bag->gem > 0)          { if(idx == i++) return ITEM_GEM; }
+    if(bag->sunbalm > 0)      { if(idx == i++) return ITEM_SUNBALM; }
+    if(bag->warroot > 0)      { if(idx == i++) return ITEM_WARROOT; }
+    if(bag->smokebomb > 0)    { if(idx == i++) return ITEM_SMOKEBOMB; }
+    if(bag->greatcrystal > 0) { if(idx == i++) return ITEM_GREATCRYSTAL; }
     return ITEM_PASS; /* unreachable: idx is always < battle_item_menu_count() */
 }
 
@@ -2992,51 +3319,56 @@ static int battle_item_menu_kind(const Bag *bag, int idx) {
    manual-switch UI -- see the item-menu comment in main()). Capture
    Crystal's label includes the live capture chance, matching
    fillItemMenu's wild-battle branch (the trainer branch, plain
-   "Capture Crystal xN", is dead code here -- b->wild is always 1). */
+   "Capture Crystal xN", is dead code here -- b->wild is always 1).
+
+   BCONTENT_H only has room for BATTLE_ITEM_VISIBLE_ROWS at once (the
+   layout was sized for the original PASS+5 items, not PASS+9) -- with
+   9 possible item types now, a player who's collected one of
+   everything needs to scroll. Paged in fixed BATTLE_ITEM_VISIBLE_ROWS
+   chunks rather than a smooth 1-row scroll so the visible window is a
+   pure function of `cur` (which page cur falls on), no extra
+   persisted scroll state needed. */
+#define BATTLE_ITEM_VISIBLE_ROWS 6
 static int draw_battle_item_menu(const Bag *bag, int cur) {
     int y = BCONTENT_Y + 8;
     int i = 0;
     char buf[40];
     int n;
+    int total, page, first, last;
+    const char *kinds_label[9];
+    int kinds_count[9];
+    int kn = 0;
 
-    draw_battle_menu_row("PASS", i++, cur, y); y += MENU_ROW_H;
+    kinds_label[kn] = "PASS"; kinds_count[kn] = -1; kn++;
+    if(bag->salve > 0)        { kinds_label[kn] = "SALVE X";     kinds_count[kn] = bag->salve; kn++; }
+    if(bag->bandage > 0)      { kinds_label[kn] = "WRAP X";      kinds_count[kn] = bag->bandage; kn++; }
+    if(bag->bitterroot > 0)   { kinds_label[kn] = "BITTERROOT X"; kinds_count[kn] = bag->bitterroot; kn++; }
+    if(bag->dust > 0)         { kinds_label[kn] = "DUST X";      kinds_count[kn] = bag->dust; kn++; }
+    if(bag->gem > 0)          { kinds_label[kn] = "CRYSTAL X";   kinds_count[kn] = bag->gem; kn++; }
+    if(bag->sunbalm > 0)      { kinds_label[kn] = "SUNBALM X";   kinds_count[kn] = bag->sunbalm; kn++; }
+    if(bag->warroot > 0)      { kinds_label[kn] = "WARROOT X";   kinds_count[kn] = bag->warroot; kn++; }
+    if(bag->smokebomb > 0)    { kinds_label[kn] = "SMOKE BOMB X"; kinds_count[kn] = bag->smokebomb; kn++; }
+    if(bag->greatcrystal > 0) { kinds_label[kn] = "GR CRYSTAL X"; kinds_count[kn] = bag->greatcrystal; kn++; }
 
-    /* Just the name and count -- unlike the bag menu (draw_bag_row's
-       ITEM_EFFECT_DESC), the mid-combat item menu never shows the
-       effect text at all, on any row: BCONTENT_W is sized tight
-       against the attack menu's own longest row ("LIGHTNING STRIKE")
-       now that it doesn't have to leave room for it. */
-    if(bag->salve > 0) {
-        n = s_cat(buf, 0, "SALVE X");
-        n = s_cat_uint(buf, n, bag->salve);
-        buf[n] = 0;
-        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
+    total = kn;
+    page = (cur / BATTLE_ITEM_VISIBLE_ROWS) * BATTLE_ITEM_VISIBLE_ROWS;
+    first = page;
+    last = first + BATTLE_ITEM_VISIBLE_ROWS;
+    if(last > total) last = total;
+
+    for(i = first; i < last; i++) {
+        if(kinds_count[i] < 0) {
+            draw_battle_menu_row(kinds_label[i], i, cur, y);
+        }
+        else {
+            n = s_cat(buf, 0, kinds_label[i]);
+            n = s_cat_uint(buf, n, kinds_count[i]);
+            buf[n] = 0;
+            draw_battle_menu_row(buf, i, cur, y);
+        }
+        y += MENU_ROW_H;
     }
-    if(bag->bandage > 0) {
-        n = s_cat(buf, 0, "WRAP X");
-        n = s_cat_uint(buf, n, bag->bandage);
-        buf[n] = 0;
-        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
-    }
-    if(bag->bitterroot > 0) {
-        n = s_cat(buf, 0, "BITTERROOT X");
-        n = s_cat_uint(buf, n, bag->bitterroot);
-        buf[n] = 0;
-        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
-    }
-    if(bag->dust > 0) {
-        n = s_cat(buf, 0, "DUST X");
-        n = s_cat_uint(buf, n, bag->dust);
-        buf[n] = 0;
-        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
-    }
-    if(bag->gem > 0) {
-        n = s_cat(buf, 0, "CRYSTAL X");
-        n = s_cat_uint(buf, n, bag->gem);
-        buf[n] = 0;
-        draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
-    }
-    return i; /* row count, for input handling to map kinds <-> cursor */
+    return total; /* row count, for input handling to map kinds <-> cursor */
 }
 
 /* attackMenu(): a spellcaster lead's attack menu is just their spell
@@ -3283,14 +3615,20 @@ typedef struct {
     int buy, sell;
 } ItemDef;
 
-/* Index order matches data.ITEM_ORDER = {salve,bandage,bitterroot,dust,gem}. */
-#define ITEM_COUNT 5
+/* Index order matches data.ITEM_ORDER = {salve,bandage,bitterroot,dust,
+   gem}, extended with the 4 new items in the same order bag_field()
+   uses (5-8). */
+#define ITEM_COUNT 9
 static const ItemDef ITEMS[ITEM_COUNT] = {
     { "MOSS SALVE",      10, 5 },
     { "LINEN WRAP",       6, 3 },
     { "BITTERROOT",       8, 4 },
     { "ASH DUST",         8, 4 },
     { "CAPTURE CRYSTAL", 20, 10 },
+    { "SUNBALM",         18, 9 },
+    { "WARROOT",          8, 4 },
+    { "SMOKE BOMB",      12, 6 },
+    { "GREATER CRYSTAL", 35, 17 },
 };
 
 static int *bag_field(Bag *bag, int idx) {
@@ -3299,7 +3637,11 @@ static int *bag_field(Bag *bag, int idx) {
         case 1: return &bag->bandage;
         case 2: return &bag->bitterroot;
         case 3: return &bag->dust;
-        default: return &bag->gem;
+        case 4: return &bag->gem;
+        case 5: return &bag->sunbalm;
+        case 6: return &bag->warroot;
+        case 7: return &bag->smokebomb;
+        default: return &bag->greatcrystal;
     }
 }
 
@@ -3437,7 +3779,8 @@ void main(void) {
        showing its dialogue, since it's a full-party heal and this
        port's only source of a party member is the shelf. */
     int got_shelf = 0, looted_crate = 0;
-    Bag bag = { 2, 2, 1, 1, 0 }; /* salve, bandage, bitterroot, dust, gem */
+    /* salve, bandage, bitterroot, dust, gem, sunbalm, warroot, smokebomb, greatcrystal */
+    Bag bag = { 2, 2, 1, 1, 0, 0, 0, 1, 0 };
     int marks = 16;
 
     /* G.party, capped at data.PARTY_MAX (6); this port's only ways to
@@ -3538,6 +3881,12 @@ void main(void) {
 #define POST_MASON2      11
 #define POST_OPEN_CHOICE 12
 #define POST_ENDING_FINAL 13
+#define POST_WSOLDIER_CLIFFS 14
+#define POST_WSOLDIER_CAMP1  15
+#define POST_WSOLDIER_CAMP2  16
+#define POST_WSOLDIER_GROVE  17
+/* Oren's stall reuses POST_SHOP directly -- same draw_shop()/ITEMS
+   table Bram's does, no separate post_action needed. */
 
     /* World NPC/pickup flags, matching state.lua's G.talkedWren etc.
        (see the world-NPC section comment above for what's ported vs
@@ -3547,6 +3896,10 @@ void main(void) {
     int got_herb = 0, got_gem = 0, got_stump = 0, read_cart = 0;
     int beat_calder = 0, beat_mason = 0, beat_shin = 0, cath_caught = 0;
     int beat_cathleen = 0; /* set on any win vs her, not just a capture -- see tile_blocked's GROVE gate */
+    int beat_wsoldier_cliffs = 0, beat_wsoldier_camp1 = 0;
+    int beat_wsoldier_camp2 = 0, beat_wsoldier_grove = 0;
+    int got_chest = 0;
+    int talked_tessa = 0, talked_birch = 0, talked_sable = 0;
     int has_scroll = 0; /* Legendary Reanimation, granted once Shinigami's win dialogue closes */
     int anne2_told = 0; /* gates Anne's second (father-died/choice) approach to firing once */
     int choice_mode = 0, choice_cur = 0; /* father-vs-Heavenfall resurrection choice screen */
@@ -3743,6 +4096,7 @@ void main(void) {
                 door_lock = 0;
                 got_shelf = 0; looted_crate = 0;
                 bag.salve = 2; bag.bandage = 2; bag.bitterroot = 1; bag.dust = 1; bag.gem = 0;
+                bag.sunbalm = 0; bag.warroot = 0; bag.smokebomb = 1; bag.greatcrystal = 0;
                 marks = 16;
                 party_n = 0; lead = 0;
                 in_battle = 0;
@@ -3756,6 +4110,10 @@ void main(void) {
                 got_herb = got_gem = got_stump = read_cart = 0;
                 beat_calder = beat_mason = beat_shin = cath_caught = 0;
                 beat_cathleen = 0; has_scroll = 0; anne2_told = 0;
+                beat_wsoldier_cliffs = 0; beat_wsoldier_camp1 = 0;
+                beat_wsoldier_camp2 = 0; beat_wsoldier_grove = 0;
+                got_chest = 0;
+                talked_tessa = 0; talked_birch = 0; talked_sable = 0;
                 choice_mode = 0; choice_cur = 0;
                 soldier_beaten[0] = soldier_beaten[1] = soldier_beaten[2] = 0;
                 mason_state = 0; mason_x = mason_y = 0.0f; mason_dir = 0; mason_anim = 0.0f;
@@ -3802,10 +4160,11 @@ void main(void) {
                         hud_flash[n] = 0;
                         hud_t = HUD_NOTE_FRAMES;
                     }
-                    else if(bag_cur == 0 || bag_cur == 1) {
-                        /* salve, bandage: only healing items that mean
-                           anything outside a battle -- hand off to the
-                           party menu to pick who gets it. */
+                    else if(bag_cur == 0 || bag_cur == 1 || bag_cur == 5) {
+                        /* salve, bandage, sunbalm: the only healing
+                           items that mean anything outside a battle --
+                           hand off to the party menu to pick who gets
+                           it. */
                         if(party_n <= 0) {
                             int n = s_cat(hud_flash, 0, "NO CRYMON TO HEAL");
                             hud_flash[n] = 0;
@@ -3836,7 +4195,7 @@ void main(void) {
                     if(heal_item >= 0) {
                         int *count = bag_field(&bag, heal_item);
                         int heal = party[party_cur].maxHp - party[party_cur].hp;
-                        int cap = (heal_item == 0) ? 22 : 12;
+                        int cap = (heal_item == 0) ? 22 : (heal_item == 5) ? 40 : 12;
                         int n;
                         if(heal <= 0) {
                             n = s_cat(hud_flash, 0, SPECIES[party[party_cur].species].name);
@@ -3944,6 +4303,50 @@ void main(void) {
                                             { MAP_VELD, MAP_FOREST, MAP_GROVE };
                                         mason2_map = MASON2_MAPS[irand(0, 2)];
                                     }
+                                }
+                                else if(battle.trainer_kind == TRAINER_WSOLDIER_CLIFFS) {
+                                    beat_wsoldier_cliffs = 1;
+                                    marks += 12;
+                                    battles++;
+                                    in_battle = 0;
+                                    enc_lock = 3;
+                                    seq_lines = TALK_WSOLDIER_CLIFFS_WIN;
+                                    seq_len = TALK_LEN(TALK_WSOLDIER_CLIFFS_WIN);
+                                    seq_beat = 0;
+                                    post_action = POST_NONE;
+                                }
+                                else if(battle.trainer_kind == TRAINER_WSOLDIER_CAMP1) {
+                                    beat_wsoldier_camp1 = 1;
+                                    marks += 14;
+                                    battles++;
+                                    in_battle = 0;
+                                    enc_lock = 3;
+                                    seq_lines = TALK_WSOLDIER_CAMP1_WIN;
+                                    seq_len = TALK_LEN(TALK_WSOLDIER_CAMP1_WIN);
+                                    seq_beat = 0;
+                                    post_action = POST_NONE;
+                                }
+                                else if(battle.trainer_kind == TRAINER_WSOLDIER_CAMP2) {
+                                    beat_wsoldier_camp2 = 1;
+                                    marks += 15;
+                                    battles++;
+                                    in_battle = 0;
+                                    enc_lock = 3;
+                                    seq_lines = TALK_WSOLDIER_CAMP2_WIN;
+                                    seq_len = TALK_LEN(TALK_WSOLDIER_CAMP2_WIN);
+                                    seq_beat = 0;
+                                    post_action = POST_NONE;
+                                }
+                                else if(battle.trainer_kind == TRAINER_WSOLDIER_GROVE) {
+                                    beat_wsoldier_grove = 1;
+                                    marks += 18;
+                                    battles++;
+                                    in_battle = 0;
+                                    enc_lock = 3;
+                                    seq_lines = TALK_WSOLDIER_GROVE_WIN;
+                                    seq_len = TALK_LEN(TALK_WSOLDIER_GROVE_WIN);
+                                    seq_beat = 0;
+                                    post_action = POST_NONE;
                                 }
                                 else if(battle.trainer_kind == TRAINER_SOLDIER) {
                                     soldier_beaten[battle.soldier_id] = 1;
@@ -4525,13 +4928,13 @@ void main(void) {
                     /* hitActor(): a live NPC blocks movement like a
                        solid tile (see actor_blocks() above). */
                     if(dx != 0 && !tile_blocked(map_id, tile_at(map_id, (nx + (dx > 0 ? 6 : -6)) / TILE,
-                                                                 py / TILE), cath_caught || beat_cathleen, beat_calder) &&
+                                                                 py / TILE), cath_caught || beat_cathleen, beat_calder, beat_shin) &&
                        !actor_blocks(map_id, nx, py, mason_state, mason_x, mason_y,
                                      anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         px = nx;
                     }
                     if(dy != 0 && !tile_blocked(map_id, tile_at(map_id, px / TILE,
-                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught || beat_cathleen, beat_calder) &&
+                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught || beat_cathleen, beat_calder, beat_shin) &&
                        !actor_blocks(map_id, px, ny, mason_state, mason_x, mason_y,
                                      anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         py = ny;
@@ -4620,6 +5023,23 @@ void main(void) {
                         do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'F', 0, &map_banner_timer);
                         door_lock = 20;
                     }
+                    else if(map_id == MAP_VELD && here == 'c') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_CLIFFS, 'D', 1, &map_banner_timer);
+                        door_lock = 20;
+                    }
+                    else if(map_id == MAP_CLIFFS && here == 'D') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'c', 0, &map_banner_timer);
+                        door_lock = 20;
+                    }
+                    else if(map_id == MAP_GROVE && here == 'g') {
+                        /* Gated on beat_shin by tile_blocked() above. */
+                        do_warp(&map_id, &px, &py, &pdir, MAP_RUINS, 'D', 1, &map_banner_timer);
+                        door_lock = 20;
+                    }
+                    else if(map_id == MAP_RUINS && here == 'D') {
+                        do_warp(&map_id, &px, &py, &pdir, MAP_GROVE, 'g', 0, &map_banner_timer);
+                        door_lock = 20;
+                    }
                 }
             }
 
@@ -4696,6 +5116,82 @@ void main(void) {
                                     battle.pl_poisoned = battle.foe_poisoned = 0;
                                     battle.bench[0] = mint_monster(SP_BRIARFOX, 7);
                                     battle.bench[1] = mint_monster(SP_DUSKHORN, 8);
+                                    battle.bench_n = 2;
+                                    battle.grew = 0;
+                                    battle.pl = party[lead];
+                                    in_battle = 1;
+                                    break;
+                                case POST_WSOLDIER_CLIFFS:
+                                    battle.foe = mint_monster(SP_EMBERLING, 5);
+                                    battle.wild = 0;
+                                    battle.trainer_kind = TRAINER_WSOLDIER_CLIFFS;
+                                    battle.phase = 0;
+                                    { int n = s_cat(battle.msg[0], 0, "SENTRY SENDS EMBERLING");
+                                      battle.msg[0][n] = 0; }
+                                    battle.msg_n = 1; battle.msg_i = 0; battle.after = BAFTER_ITEM;
+                                    battle.cur = 0;
+                                    battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
+                                    battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
+                                    battle.bench[0] = mint_monster(SP_FROSTAIL, 6);
+                                    battle.bench[1] = mint_monster(SP_STORMWING, 7);
+                                    battle.bench_n = 2;
+                                    battle.grew = 0;
+                                    battle.pl = party[lead];
+                                    in_battle = 1;
+                                    break;
+                                case POST_WSOLDIER_CAMP1:
+                                    battle.foe = mint_monster(SP_SABLECLAW, 7);
+                                    battle.wild = 0;
+                                    battle.trainer_kind = TRAINER_WSOLDIER_CAMP1;
+                                    battle.phase = 0;
+                                    { int n = s_cat(battle.msg[0], 0, "CONSCRIPT SENDS SABLECLAW");
+                                      battle.msg[0][n] = 0; }
+                                    battle.msg_n = 1; battle.msg_i = 0; battle.after = BAFTER_ITEM;
+                                    battle.cur = 0;
+                                    battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
+                                    battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
+                                    battle.bench[0] = mint_monster(SP_BOULDERAM, 8);
+                                    battle.bench[1] = mint_monster(SP_ASHENMAW, 9);
+                                    battle.bench_n = 2;
+                                    battle.grew = 0;
+                                    battle.pl = party[lead];
+                                    in_battle = 1;
+                                    break;
+                                case POST_WSOLDIER_CAMP2:
+                                    battle.foe = mint_monster(SP_THORNHIDE, 8);
+                                    battle.wild = 0;
+                                    battle.trainer_kind = TRAINER_WSOLDIER_CAMP2;
+                                    battle.phase = 0;
+                                    { int n = s_cat(battle.msg[0], 0, "ENFORCER SENDS THORNHIDE");
+                                      battle.msg[0][n] = 0; }
+                                    battle.msg_n = 1; battle.msg_i = 0; battle.after = BAFTER_ITEM;
+                                    battle.cur = 0;
+                                    battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
+                                    battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
+                                    battle.bench[0] = mint_monster(SP_GLASSWISP, 9);
+                                    battle.bench[1] = mint_monster(SP_DUSKHORN, 10);
+                                    battle.bench_n = 2;
+                                    battle.grew = 0;
+                                    battle.pl = party[lead];
+                                    in_battle = 1;
+                                    break;
+                                case POST_WSOLDIER_GROVE:
+                                    battle.foe = mint_monster(SP_CRYMARE, 9);
+                                    battle.wild = 0;
+                                    battle.trainer_kind = TRAINER_WSOLDIER_GROVE;
+                                    battle.phase = 0;
+                                    { int n = s_cat(battle.msg[0], 0, "WARDEN SENDS CRYMARE");
+                                      battle.msg[0][n] = 0; }
+                                    battle.msg_n = 1; battle.msg_i = 0; battle.after = BAFTER_ITEM;
+                                    battle.cur = 0;
+                                    battle.mods_self_str = battle.mods_self_agl = battle.mods_self_spc = 0;
+                                    battle.mods_foe_str = battle.mods_foe_agl = battle.mods_foe_spc = 0;
+                                    battle.pl_poisoned = battle.foe_poisoned = 0;
+                                    battle.bench[0] = mint_monster(SP_ASHENMAW, 10);
+                                    battle.bench[1] = mint_monster(SP_BOULDERAM, 11);
                                     battle.bench_n = 2;
                                     battle.grew = 0;
                                     battle.pl = party[lead];
@@ -5095,6 +5591,19 @@ void main(void) {
                         seq_len = TALK_LEN(TALK_CATHLEEN_GONE);
                         seq_beat = 0;
                     }
+                    else if(near_mark(map_id, 'K', px, py, 676)) {
+                        /* Warden Cross, a Weeping Army soldier. */
+                        if(beat_wsoldier_grove) {
+                            seq_lines = TALK_WSOLDIER_GROVE_WIN;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_GROVE_WIN);
+                        }
+                        else {
+                            seq_lines = TALK_WSOLDIER_GROVE_SPOT;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_GROVE_SPOT);
+                            post_action = POST_WSOLDIER_GROVE;
+                        }
+                        seq_beat = 0;
+                    }
                 }
                 else if(map_id == MAP_CAMP) {
                     /* The Weeping Army officer (mark 'I'): a taunt,
@@ -5105,6 +5614,110 @@ void main(void) {
                     if(near_mark(map_id, 'I', px, py, 676)) {
                         seq_lines = TALK_CAMP_COMMANDER;
                         seq_len = TALK_LEN(TALK_CAMP_COMMANDER);
+                        post_action = POST_NONE;
+                        seq_beat = 0;
+                    }
+                    else if(near_mark(map_id, 'K', px, py, 676)) {
+                        if(beat_wsoldier_camp1) {
+                            seq_lines = TALK_WSOLDIER_CAMP1_WIN;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_CAMP1_WIN);
+                        }
+                        else {
+                            seq_lines = TALK_WSOLDIER_CAMP1_SPOT;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_CAMP1_SPOT);
+                            post_action = POST_WSOLDIER_CAMP1;
+                        }
+                        seq_beat = 0;
+                    }
+                    else if(near_mark(map_id, 'A', px, py, 676)) {
+                        if(beat_wsoldier_camp2) {
+                            seq_lines = TALK_WSOLDIER_CAMP2_WIN;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_CAMP2_WIN);
+                        }
+                        else {
+                            seq_lines = TALK_WSOLDIER_CAMP2_SPOT;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_CAMP2_SPOT);
+                            post_action = POST_WSOLDIER_CAMP2;
+                        }
+                        seq_beat = 0;
+                    }
+                }
+                else if(map_id == MAP_CLIFFS) {
+                    if(near_mark(map_id, 'V', px, py, 676)) {
+                        if(beat_wsoldier_cliffs) {
+                            seq_lines = TALK_WSOLDIER_CLIFFS_WIN;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_CLIFFS_WIN);
+                        }
+                        else {
+                            seq_lines = TALK_WSOLDIER_CLIFFS_SPOT;
+                            seq_len = TALK_LEN(TALK_WSOLDIER_CLIFFS_SPOT);
+                            post_action = POST_WSOLDIER_CLIFFS;
+                        }
+                        seq_beat = 0;
+                    }
+                    else if(near_mark(map_id, 'Y', px, py, 676)) {
+                        if(talked_tessa) {
+                            seq_lines = TALK_TESSA_AGAIN;
+                            seq_len = TALK_LEN(TALK_TESSA_AGAIN);
+                        }
+                        else {
+                            talked_tessa = 1;
+                            bag.greatcrystal++;
+                            seq_lines = TALK_TESSA_FIRST;
+                            seq_len = TALK_LEN(TALK_TESSA_FIRST);
+                        }
+                        post_action = POST_NONE;
+                        seq_beat = 0;
+                    }
+                    else if(near_mark(map_id, 'C', px, py, 676)) {
+                        if(got_chest) {
+                            seq_lines = TALK_CHEST_EMPTY;
+                            seq_len = TALK_LEN(TALK_CHEST_EMPTY);
+                        }
+                        else {
+                            got_chest = 1;
+                            marks += 25;
+                            bag.sunbalm++;
+                            bag.greatcrystal++;
+                            seq_lines = TALK_CHEST;
+                            seq_len = TALK_LEN(TALK_CHEST);
+                        }
+                        post_action = POST_NONE;
+                        seq_beat = 0;
+                    }
+                }
+                else if(map_id == MAP_RUINS) {
+                    if(near_mark(map_id, 'J', px, py, 676)) {
+                        seq_lines = TALK_OREN_OPEN;
+                        seq_len = TALK_LEN(TALK_OREN_OPEN);
+                        post_action = POST_SHOP;
+                        seq_beat = 0;
+                    }
+                    else if(near_mark(map_id, 'K', px, py, 676)) {
+                        if(talked_birch) {
+                            seq_lines = TALK_BIRCH_AGAIN;
+                            seq_len = TALK_LEN(TALK_BIRCH_AGAIN);
+                        }
+                        else {
+                            talked_birch = 1;
+                            bag.sunbalm++;
+                            seq_lines = TALK_BIRCH_FIRST;
+                            seq_len = TALK_LEN(TALK_BIRCH_FIRST);
+                        }
+                        post_action = POST_NONE;
+                        seq_beat = 0;
+                    }
+                    else if(near_mark(map_id, 'A', px, py, 676)) {
+                        if(talked_sable) {
+                            seq_lines = TALK_SABLE_AGAIN;
+                            seq_len = TALK_LEN(TALK_SABLE_AGAIN);
+                        }
+                        else {
+                            talked_sable = 1;
+                            bag.warroot++;
+                            seq_lines = TALK_SABLE_FIRST;
+                            seq_len = TALK_LEN(TALK_SABLE_FIRST);
+                        }
                         post_action = POST_NONE;
                         seq_beat = 0;
                     }
