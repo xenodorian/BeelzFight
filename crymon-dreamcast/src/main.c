@@ -1927,8 +1927,13 @@ static void draw_party_detail(const Monster *party, int party_n, int idx) {
 
 }
 
+/* heal_item selects who a salve/wrap picked from the bag menu goes to
+   (0 salve, 1 wrap, -1 not healing) -- same list as the plain party
+   menu, just with a different title/footer and A applying the item
+   to party_cur instead of setting the lead (see main()'s menu_mode==2
+   input handling). */
 static void draw_party_menu(const Monster *party, int party_n, int lead, int party_cur,
-                             int party_detail) {
+                             int party_detail, int heal_item) {
     int y = MENU_Y + 24;
 
     if(party_detail && party_n > 0) {
@@ -1936,7 +1941,11 @@ static void draw_party_menu(const Monster *party, int party_n, int lead, int par
         return;
     }
 
-    draw_menu_frame("CRYMON", "B CLOSE");
+    if(heal_item >= 0)
+        draw_menu_frame(heal_item == 0 ? "USE MOSS SALVE ON WHO?" : "USE LINEN WRAP ON WHO?",
+                         "A HEAL  B CANCEL");
+    else
+        draw_menu_frame("CRYMON", "B CLOSE");
 
     if(party_n > 0) {
         int i;
@@ -1957,8 +1966,9 @@ static void draw_party_menu(const Monster *party, int party_n, int lead, int par
             draw_text_s(buf, MENU_X + 8, y, color, MENU_SCALE);
             y += MENU_ROW_H;
         }
-        draw_text_s("A LEAD  Y VIEW", MENU_X + 8, MENU_Y + MENU_H - 32,
-                    rgb565(138, 134, 120), MENU_SCALE);
+        if(heal_item < 0)
+            draw_text_s("A LEAD  Y VIEW", MENU_X + 8, MENU_Y + MENU_H - 32,
+                        rgb565(138, 134, 120), MENU_SCALE);
     }
     else {
         draw_text_s("NO CRYMON YET", MENU_X + 8, y, rgb565(138, 134, 120), MENU_SCALE);
@@ -2612,14 +2622,15 @@ static int try_encounter(int map_id, int px, int py, int party_n,
  * directly over the battle background/sprites now, just outlined.
  * ---------------------------------------------------------------------- */
 
-/* The foe's CryMon sits flush in the upper right, its status box
-   directly below it, right-aligned to the sprite. Max's CryMon sits
-   flush in the lower left, sprite only -- Max's status box is stacked
-   directly beneath the foe's box instead (same column, same width),
-   so both single-line readouts read together as one pair up top
-   rather than one being tucked against Max's own corner. The
-   message/menu box sits in the lower right. BSTATUS_* is shared by
-   both status boxes -- a single row (name, level and HP all on one
+/* The foe's CryMon sits flush in the upper right; Max's CryMon sits
+   flush in the lower left; the message/menu box sits in the lower
+   right. The two status boxes are neither corner-tucked against their
+   own sprite nor stacked on each other -- both sit near the vertical
+   middle of the screen, clear of one another: the foe's a bit higher
+   and pushed as far right as it can go without risking the edge, Max's
+   a bit lower and pushed as far left as it can go, so they read as a
+   matched diagonal pair instead of a single column. BSTATUS_* is
+   shared by both -- a single row (name, level and HP all on one
    line), sized for that line's worst case ("*NEEDLEROOT LV12 87/87",
    the longest species name/highest level+HP this game's level-12 cap
    and try_encounter()'s wild-level table ever produce).
@@ -2627,16 +2638,16 @@ static int try_encounter(int map_id, int px, int py, int party_n,
    Both boxes are far wider than the old 98px corner boxes -- too wide
    to sit anywhere BCONTENT_Y..SCREEN_H (BCONTENT claims that whole
    band from x=BCONTENT_X rightward) without overlapping the
-   message/menu box, so the whole sprite+box+box stack (foe sprite,
-   foe box, Max's box) is kept above BCONTENT_Y. MONSTER_SPRITE_W/H is
-   sized to leave room for that stack (sprite, then two stacked
-   single-line boxes, then BGAP clearance above BCONTENT_Y) while
-   still reading as a clear size bump over the original 56px sprite.
-   Max's own sprite isn't part of that stack -- its 64px width keeps
-   it left of BCONTENT_X regardless of how far down the screen it
-   sits, so it stays flush in the true lower-left corner, independent
-   of where Max's box ended up. BGAP is the fixed clearance kept
-   between every pair of these elements. */
+   message/menu box, so both are kept above BCONTENT_Y, staggered in Y
+   (BGAP clear of each other) so a wide box on the left and a wide box
+   on the right never need to share a row. MONSTER_SPRITE_W/H is sized
+   to leave room for the foe's sprite, then its box, then BGAP
+   clearance above BCONTENT_Y, while still reading as a clear size
+   bump over the original 56px sprite. Max's own sprite isn't part of
+   that stack -- its 64px width keeps it left of BCONTENT_X regardless
+   of how far down the screen it sits, so it stays flush in the true
+   lower-left corner, independent of where Max's box ended up. BGAP is
+   the fixed clearance kept between every pair of these elements. */
 #define BGAP          4
 
 #define BFOE_SPRITE_X (SCREEN_W - 8 - MONSTER_SPRITE_W)
@@ -2647,7 +2658,7 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 
 #define BFOE_BOX_W    BSTATUS_BOX_W
 #define BFOE_BOX_H    BSTATUS_BOX_H
-#define BFOE_BOX_X    (BFOE_SPRITE_X + MONSTER_SPRITE_W - BSTATUS_BOX_W)
+#define BFOE_BOX_X    (SCREEN_W - 4 - BSTATUS_BOX_W)
 #define BFOE_BOX_Y    (BFOE_SPRITE_Y + MONSTER_SPRITE_H + BGAP)
 
 #define BCONTENT_W    210
@@ -2660,7 +2671,7 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 
 #define BPL_BOX_W     BSTATUS_BOX_W
 #define BPL_BOX_H     BSTATUS_BOX_H
-#define BPL_BOX_X     BFOE_BOX_X
+#define BPL_BOX_X     4
 #define BPL_BOX_Y     (BFOE_BOX_Y + BSTATUS_BOX_H + BGAP)
 
 #define BROW_H        16
@@ -3256,6 +3267,7 @@ void main(void) {
     int party_cur = 0; /* cursor row inside the party menu */
     int party_detail = 0; /* party menu: 0 list, 1 viewing party_cur's detail */
     int bag_cur = 0; /* cursor row inside the bag menu */
+    int heal_item = -1; /* -1 = not choosing a heal target, else bag_cur (0 salve, 1 wrap) */
 
     /* HUD toast, matching state.lua's G.hud/G.hudT/note(): a small
        banner (lead-switch confirmation, the post-win "grew to lv N"/
@@ -3459,7 +3471,7 @@ void main(void) {
                 party_n = 0; lead = 0;
                 in_battle = 0;
                 enc_lock = 8; last_tx = -1; last_ty = -1;
-                menu_mode = 0; party_cur = 0; party_detail = 0; bag_cur = 0;
+                menu_mode = 0; party_cur = 0; party_detail = 0; bag_cur = 0; heal_item = -1;
                 hud_flash[0] = 0; hud_t = 0;
                 seq_lines = 0; seq_len = 0; seq_beat = 0;
                 post_action = POST_NONE; post_soldier_id = 0;
@@ -3486,15 +3498,20 @@ void main(void) {
             }
         }
         else if(menu_mode) {
-            /* MODE.BAG/MODE.PARTY update. BAG now has its own
-               cursor/use logic (up/down picks a row, A uses it --
-               salve/wrap heal the lead directly; bitterroot/dust/gem
-               are battle-only mods with nothing to apply outside one,
-               so A just says so). PARTY still has cycleParty(to) (A
-               sets the lead), plus Y now opens a detail view for
-               party_cur (attacks, stats, party order) that up/down
-               keeps browsing live and B backs out of before closing
-               the menu itself. */
+            /* MODE.BAG/MODE.PARTY update. BAG has its own cursor/use
+               logic (up/down picks a row, A uses it); bitterroot/
+               dust/gem are battle-only mods with nothing to apply
+               outside one, so A just says so, but salve/wrap heal
+               *some* CryMon, and outside a battle that's a choice --
+               picking either one hands off to the party menu
+               (heal_item tracks which item this is, so this isn't
+               read as an ordinary party-menu visit) where up/down
+               now picks who receives it and A applies it, instead of
+               always healing the lead. PARTY still has cycleParty(to)
+               otherwise (A sets the lead), plus Y opens a detail view
+               for party_cur (attacks, stats, party order) that
+               up/down keeps browsing live and B backs out of before
+               closing the menu itself. */
             if(menu_mode == 1) {
                 if(up_now && !prev_up)
                     bag_cur = (bag_cur - 1 + ITEM_COUNT) % ITEM_COUNT;
@@ -3502,37 +3519,32 @@ void main(void) {
                     bag_cur = (bag_cur + 1) % ITEM_COUNT;
                 if(a_now && !prev_a) {
                     int *count = bag_field(&bag, bag_cur);
-                    int n = 0;
                     if(*count <= 0) {
-                        n = s_cat(hud_flash, 0, "NONE LEFT");
+                        int n = s_cat(hud_flash, 0, "NONE LEFT");
+                        hud_flash[n] = 0;
+                        hud_t = HUD_NOTE_FRAMES;
                     }
                     else if(bag_cur == 0 || bag_cur == 1) {
                         /* salve, bandage: only healing items that mean
-                           anything outside a battle. */
-                        if(party_n <= 0 || party[lead].hp <= 0) {
-                            n = s_cat(hud_flash, 0, "NO CRYMON TO HEAL");
-                        }
-                        else if(party[lead].hp >= party[lead].maxHp) {
-                            n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
-                            n = s_cat(hud_flash, n, " IS AT FULL HP");
+                           anything outside a battle -- hand off to the
+                           party menu to pick who gets it. */
+                        if(party_n <= 0) {
+                            int n = s_cat(hud_flash, 0, "NO CRYMON TO HEAL");
+                            hud_flash[n] = 0;
+                            hud_t = HUD_NOTE_FRAMES;
                         }
                         else {
-                            int heal = party[lead].maxHp - party[lead].hp;
-                            int cap = (bag_cur == 0) ? 22 : 12;
-                            if(heal > cap) heal = cap;
-                            party[lead].hp += heal;
-                            (*count)--;
-                            n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
-                            n = s_cat(hud_flash, n, " HEALED ");
-                            n = s_cat_uint(hud_flash, n, heal);
-                            n = s_cat(hud_flash, n, " HP");
+                            heal_item = bag_cur;
+                            party_cur = lead;
+                            party_detail = 0;
+                            menu_mode = 2;
                         }
                     }
                     else {
-                        n = s_cat(hud_flash, 0, "ONLY USABLE IN BATTLE");
+                        int n = s_cat(hud_flash, 0, "ONLY USABLE IN BATTLE");
+                        hud_flash[n] = 0;
+                        hud_t = HUD_NOTE_FRAMES;
                     }
-                    hud_flash[n] = 0;
-                    hud_t = HUD_NOTE_FRAMES;
                 }
             }
             else if(menu_mode == 2 && party_n > 0) {
@@ -3540,27 +3552,59 @@ void main(void) {
                     party_cur = (party_cur - 1 + party_n) % party_n;
                 if(down_now && !prev_down)
                     party_cur = (party_cur + 1) % party_n;
-                if(y_now && !prev_y)
+                if(heal_item < 0 && y_now && !prev_y)
                     party_detail = !party_detail;
-                if(a_now && !prev_a && !party_detail) {
-                    if(party[party_cur].hp > 0 && party_cur != lead) {
+                if(a_now && !prev_a) {
+                    if(heal_item >= 0) {
+                        int *count = bag_field(&bag, heal_item);
+                        int heal = party[party_cur].maxHp - party[party_cur].hp;
+                        int cap = (heal_item == 0) ? 22 : 12;
                         int n;
-                        lead = party_cur;
-                        n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
-                        n = s_cat(hud_flash, n, " TAKES THE LEAD");
+                        if(heal <= 0) {
+                            n = s_cat(hud_flash, 0, SPECIES[party[party_cur].species].name);
+                            n = s_cat(hud_flash, n, " IS AT FULL HP");
+                        }
+                        else {
+                            if(heal > cap) heal = cap;
+                            party[party_cur].hp += heal;
+                            (*count)--;
+                            n = s_cat(hud_flash, 0, SPECIES[party[party_cur].species].name);
+                            n = s_cat(hud_flash, n, " HEALED ");
+                            n = s_cat_uint(hud_flash, n, heal);
+                            n = s_cat(hud_flash, n, " HP");
+                        }
                         hud_flash[n] = 0;
                         hud_t = HUD_NOTE_FRAMES;
+                        heal_item = -1;
+                        menu_mode = 0;
+                    }
+                    else if(!party_detail) {
+                        if(party[party_cur].hp > 0 && party_cur != lead) {
+                            int n;
+                            lead = party_cur;
+                            n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
+                            n = s_cat(hud_flash, n, " TAKES THE LEAD");
+                            hud_flash[n] = 0;
+                            hud_t = HUD_NOTE_FRAMES;
+                        }
                     }
                 }
             }
             if(b_now && !prev_b) {
-                if(menu_mode == 2 && party_detail)
+                if(menu_mode == 2 && heal_item >= 0) {
+                    heal_item = -1;
+                    menu_mode = 1;
+                }
+                else if(menu_mode == 2 && party_detail)
                     party_detail = 0;
                 else
                     menu_mode = 0;
             }
-            else if(start_now && !prev_start)
+            else if(start_now && !prev_start) {
                 menu_mode = 0;
+                heal_item = -1;
+                party_detail = 0;
+            }
         }
         else if(in_battle) {
             /* updateBattle(), matching state.lua's bPhase dispatch:
@@ -4729,10 +4773,12 @@ void main(void) {
                 if(y_now && !prev_y) {
                     menu_mode = 1;
                     bag_cur = 0;
+                    heal_item = -1;
                 }
                 else if(start_now && !prev_start) {
                     menu_mode = 2;
                     party_detail = 0;
+                    heal_item = -1;
                 }
             }
         }
@@ -4774,7 +4820,7 @@ void main(void) {
             if(menu_mode == 1)
                 draw_bag_menu(&bag, marks, bag_cur);
             else if(menu_mode == 2)
-                draw_party_menu(party, party_n, lead, party_cur, party_detail);
+                draw_party_menu(party, party_n, lead, party_cur, party_detail, heal_item);
             if(in_battle)
                 draw_battle(&battle, &bag, frame_count);
             if(shop_open)
