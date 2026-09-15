@@ -382,49 +382,72 @@ static const uint8_t glyph_exclaim[8] = {
     0b00011000, 0, 0b00011000, 0,
 };
 
-/* Every text call draws with a 1px black outline now instead of
+/* Every text call draws bold with a 2px black outline instead of
    sitting on an opaque box (see the now-boxless draw_dialogue_box/
-   draw_menu_frame/draw_box/draw_hud_toast below) -- 8 black copies of
-   the glyph offset by 1px in each direction, then the real color on
-   top, so the outline has no diagonal gaps at glyph corners. Costs
-   9x the fill work per glyph, but glyphs are tiny (8x8) and this
-   only runs for on-screen text, well within budget. */
+   draw_menu_frame/draw_box/draw_hud_toast below).
+   BOLD_DX/DY draw the real color 4 times (0,0)/(1,0)/(0,1)/(1,1) --
+   a diagonal faux-bold thickening a plain single-pixel-stroke bitmap
+   font actually needs, since just moving it 1px right alone leaves
+   verticals in "OIL"-type glyphs looking thin from the top/bottom.
+   OUTLINE_DX/DY is a full 2px ring (every offset from -2..2 except
+   (0,0), 24 of them) drawn in black first so the border has no
+   gaps at glyph corners even at that thickness. Costs ~25x the fill
+   work per glyph over the original single-pass version, but glyphs
+   are tiny (8x8) and this only runs for on-screen text. */
 static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int scale) {
-    static const int OUTLINE_DX[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
-    static const int OUTLINE_DY[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
-    int row, col, sx, sy, k;
+    static const int BOLD_DX[4] = { 0, 1, 0, 1 };
+    static const int BOLD_DY[4] = { 0, 0, 1, 1 };
+    int row, col, sx, sy, k, dx, dy;
 
-    for(k = 0; k < 8; k++) {
-        for(row = 0; row < 8; row++) {
-            uint8_t bits = bitmap[row];
-            for(col = 0; col < 8; col++) {
-                if(!(bits & (0x80 >> col)))
-                    continue;
-                for(sy = 0; sy < scale; sy++)
-                    for(sx = 0; sx < scale; sx++)
-                        put_pixel(ox + col * scale + sx + OUTLINE_DX[k],
-                                  oy + row * scale + sy + OUTLINE_DY[k], 0x0000);
+    for(dy = -2; dy <= 2; dy++) {
+        for(dx = -2; dx <= 2; dx++) {
+            if(dx == 0 && dy == 0)
+                continue;
+            for(row = 0; row < 8; row++) {
+                uint8_t bits = bitmap[row];
+                for(col = 0; col < 8; col++) {
+                    if(!(bits & (0x80 >> col)))
+                        continue;
+                    for(sy = 0; sy < scale; sy++)
+                        for(sx = 0; sx < scale; sx++)
+                            put_pixel(ox + col * scale + sx + dx,
+                                      oy + row * scale + sy + dy, 0x0000);
+                }
             }
         }
     }
 
-    for(row = 0; row < 8; row++) {
-        uint8_t bits = bitmap[row];
+    for(k = 0; k < 4; k++) {
+        for(row = 0; row < 8; row++) {
+            uint8_t bits = bitmap[row];
 
-        for(col = 0; col < 8; col++) {
-            if(!(bits & (0x80 >> col)))
-                continue;
+            for(col = 0; col < 8; col++) {
+                if(!(bits & (0x80 >> col)))
+                    continue;
 
-            for(sy = 0; sy < scale; sy++)
-                for(sx = 0; sx < scale; sx++)
-                    put_pixel(ox + col * scale + sx, oy + row * scale + sy, color);
+                for(sy = 0; sy < scale; sy++)
+                    for(sx = 0; sx < scale; sx++)
+                        put_pixel(ox + col * scale + sx + BOLD_DX[k],
+                                  oy + row * scale + sy + BOLD_DY[k], color);
+            }
         }
     }
 }
 
+/* Extra gap between characters, beyond the glyph's own 8px cell,
+   scaled the same as everything else -- a plain fixed-width 8px
+   advance read as visually cramped once the font went bold.
+   CHAR_CELL is the resulting total per-character advance; every
+   char-count-based word-wrap width (DIALOGUE_MAX_CHARS, the battle
+   message box, the ending screen) is computed from it rather than a
+   bare /8, so wrapping still matches the font's real on-screen
+   width instead of running text past the edge of its box. */
+#define LETTER_GAP(scale) (scale)
+#define CHAR_CELL(scale)  (8 * (scale) + LETTER_GAP(scale))
+
 static void draw_text_s(const char *s, int x, int y, u16 color, int scale) {
     int cx = x;
-    int px = 8 * scale;
+    int px = CHAR_CELL(scale);
     for(; *s; s++) {
         if(*s >= 'A' && *s <= 'Z')
             draw_glyph(cx, y, font_AZ[*s - 'A'], color, scale);
@@ -453,7 +476,7 @@ static void draw_text_s(const char *s, int x, int y, u16 color, int scale) {
 static int text_width_s(const char *s, int scale) {
     int n = 0;
     for(; *s; s++) n++;
-    return n * 8 * scale;
+    return n * CHAR_CELL(scale);
 }
 
 static void draw_text_center_s(const char *s, int cx, int y, u16 color, int scale) {
@@ -1011,10 +1034,39 @@ typedef struct {
     int sign;
 } Soldier;
 
-static void draw_npc(int map_id, char mark, const u16 *px, int w, int h, int cam_x, int cam_y) {
+/* Every world actor (the 8 stationary NPCs, Mason/Anne/soldiers, and
+   the player) is bottom-center anchored at a "feet" point (cx, cy) in
+   map/world pixel space -- draw order used to just be "all the NPCs,
+   then the player on top, always", so the player would occlude an
+   NPC standing further down the screen than them (in front, by the
+   usual 2D convention) instead of the other way around. Now every
+   sprite due to be drawn this frame is collected into this list
+   first, instead of blitting immediately, so they can all be sorted
+   by cy and drawn back-to-front (lower feet == closer to the camera
+   == drawn last == on top) regardless of which is the player and
+   which is an NPC. */
+typedef struct {
+    const u16 *px;
+    int w, h;
+    int cx, cy;
+} WorldSprite;
+
+#define MAX_WORLD_SPRITES 12
+
+static void ws_push(WorldSprite *list, int *n, const u16 *px, int w, int h, int cx, int cy) {
+    if(*n >= MAX_WORLD_SPRITES) return;
+    list[*n].px = px;
+    list[*n].w = w;
+    list[*n].h = h;
+    list[*n].cx = cx;
+    list[*n].cy = cy;
+    (*n)++;
+}
+
+static void ws_push_mark(WorldSprite *list, int *n, int map_id, char mark, const u16 *px, int w, int h) {
     int cx, cy;
     mark_center(map_id, mark, &cx, &cy);
-    blit_sprite(px, w, h, cx - cam_x - w / 2, cy - cam_y - h);
+    ws_push(list, n, px, w, h, cx, cy);
 }
 
 /* Idle-animated variant of the above, for the 8 stationary NPCs that
@@ -1022,12 +1074,11 @@ static void draw_npc(int map_id, char mark, const u16 *px, int w, int h, int cam
    `Math.floor(this.clock * 4) % 4 + 1`, `* 3` for Shinigami --
    frames_per_step converts that fps into "how many 60Hz vblank
    frames this idle frame holds", 15 for 4fps, 20 for 3fps). */
-static void draw_npc_idle(int map_id, char mark, const u16 *const frames[4], u32 frame_count,
-                           int frames_per_step, int w, int h, int cam_x, int cam_y) {
-    int cx, cy;
+static void ws_push_mark_idle(WorldSprite *list, int *n, int map_id, char mark,
+                               const u16 *const frames[4], u32 frame_count,
+                               int frames_per_step, int w, int h) {
     int f = (int)((frame_count / (u32)frames_per_step) % 4u);
-    mark_center(map_id, mark, &cx, &cy);
-    blit_sprite(frames[f], w, h, cx - cam_x - w / 2, cy - cam_y - h);
+    ws_push_mark(list, n, map_id, mark, frames[f], w, h);
 }
 
 /* dir/frame lookup tables for the 3 walking actors (Mason, Anne, the
@@ -1052,11 +1103,9 @@ static const u16 *const SOLDIER_FRAMES[4][4] = {
     { npc_soldier_right_1, npc_soldier_right_2, npc_soldier_right_3, npc_soldier_right_4 },
 };
 
-static void draw_walker(const u16 *const frames[4][4], float x, float y, int dir, int frame,
-                         int cam_x, int cam_y) {
-    int cx = (int)x, cy = (int)y;
-    blit_sprite(frames[dir & 3][frame & 3], NPC_SPRITE_W, NPC_SPRITE_H,
-                cx - cam_x - NPC_SPRITE_W / 2, cy - cam_y - NPC_SPRITE_H);
+static void ws_push_walker(WorldSprite *list, int *n, const u16 *const frames[4][4],
+                            float x, float y, int dir, int frame) {
+    ws_push(list, n, frames[dir & 3][frame & 3], NPC_SPRITE_W, NPC_SPRITE_H, (int)x, (int)y);
 }
 
 static const u16 *const WREN_FRAMES[4]   = { npc_wren_1, npc_wren_2, npc_wren_3, npc_wren_4 };
@@ -1068,64 +1117,81 @@ static const u16 *const BRAM_FRAMES[4]   = { npc_bram_1, npc_bram_2, npc_bram_3,
 static const u16 *const CALDER_FRAMES[4] = { npc_calder_1, npc_calder_2, npc_calder_3, npc_calder_4 };
 static const u16 *const SHINIGAMI_FRAMES[4] = { npc_shinigami_1, npc_shinigami_2, npc_shinigami_3, npc_shinigami_4 };
 
-static void draw_npcs(int map_id, int cam_x, int cam_y, u32 frame_count,
-                       int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
-                       int anne_state, float anne_x, float anne_y, int anne_dir, int anne_frame,
-                       int cath_caught, const Soldier *soldiers, const int *soldier_beaten) {
+static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
+                          int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
+                          int anne_state, float anne_x, float anne_y, int anne_dir, int anne_frame,
+                          int cath_caught, const Soldier *soldiers, const int *soldier_beaten) {
     if(map_id == MAP_VELD) {
-        draw_npc_idle(map_id, 'K', WREN_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc_idle(map_id, 'I', MAE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc_idle(map_id, 'V', IVO_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc_idle(map_id, 'A', NELL_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc_idle(map_id, 'Q', PIKE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc_idle(map_id, 'J', BRAM_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
-        draw_npc_idle(map_id, 'E', CALDER_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        ws_push_mark_idle(list, n, map_id, 'K', WREN_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'I', MAE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'V', IVO_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'A', NELL_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'Q', PIKE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'J', BRAM_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'E', CALDER_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
         if(mason_state)
-            draw_walker(MASON_FRAMES, mason_x, mason_y, mason_dir, mason_frame, cam_x, cam_y);
+            ws_push_walker(list, n, MASON_FRAMES, mason_x, mason_y, mason_dir, mason_frame);
         if(anne_state)
-            draw_walker(ANNE_FRAMES, anne_x, anne_y, anne_dir, anne_frame, cam_x, cam_y);
+            ws_push_walker(list, n, ANNE_FRAMES, anne_x, anne_y, anne_dir, anne_frame);
     }
     else if(map_id == MAP_FOREST) {
         int i;
         for(i = 0; i < 3; i++) {
             if(soldier_beaten[i]) continue;
-            draw_walker(SOLDIER_FRAMES, soldiers[i].x, soldiers[i].y, soldiers[i].dir,
-                        (int)soldiers[i].anim, cam_x, cam_y);
+            ws_push_walker(list, n, SOLDIER_FRAMES, soldiers[i].x, soldiers[i].y, soldiers[i].dir,
+                            (int)soldiers[i].anim);
         }
     }
     else if(map_id == MAP_GROVE) {
-        draw_npc_idle(map_id, '9', SHINIGAMI_FRAMES, frame_count, 20, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        ws_push_mark_idle(list, n, map_id, '9', SHINIGAMI_FRAMES, frame_count, 20, NPC_SPRITE_W, NPC_SPRITE_H);
         if(!cath_caught)
-            draw_npc(map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H, cam_x, cam_y);
+            ws_push_mark(list, n, map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H);
     }
     else if(map_id == MAP_CAMP) {
         /* No dedicated commander art -- reuses the soldier sprite
            (down-facing, standing) since he's a camp officer too. */
-        draw_npc(map_id, 'I', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H, cam_x, cam_y);
+        ws_push_mark(list, n, map_id, 'I', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
     }
 }
 
-/* Player sprite, bottom-center anchored at (cx, cy) same as the
-   silhouette this replaces (draw.lua's draw.actor() used the same
-   anchor). dir matches the sprite arrays below: 0=down,1=up,2=left,
-   3=right. */
-/* Walk-cycle animation, matching state.lua's G.panim/G.pframe: 4
-   frames per direction, stepping to the next one every 10 frames
-   while moving (dt*6 per frame at our fixed ~60fps vblank rate takes
-   10 frames to cross 1.0, same as the reference), frozen on frame 0
-   while standing still. main() drives anim_frame the same way
-   G.pframe is driven. */
+/* Insertion sort by cy (small n, not worth anything fancier) then
+   blit back-to-front: lower feet (larger cy) draw last, i.e. on top,
+   matching the usual 2D convention that standing further down the
+   screen means standing closer to the camera. */
+static void ws_sort_and_draw(WorldSprite *list, int n, int cam_x, int cam_y) {
+    int i, j;
+    for(i = 1; i < n; i++) {
+        WorldSprite key = list[i];
+        j = i - 1;
+        while(j >= 0 && list[j].cy > key.cy) {
+            list[j + 1] = list[j];
+            j--;
+        }
+        list[j + 1] = key;
+    }
+    for(i = 0; i < n; i++) {
+        const WorldSprite *s = &list[i];
+        blit_sprite(s->px, s->w, s->h, s->cx - cam_x - s->w / 2, s->cy - cam_y - s->h);
+    }
+}
+
+/* Player sprite, bottom-center anchored at (cx, cy) same as every
+   other world actor above -- pushed into the same WorldSprite list as
+   the NPCs now (see main()'s draw dispatch) instead of always being
+   blit last/on top, so the depth sort in ws_sort_and_draw() applies
+   to the player too. dir matches the sprite arrays below: 0=down,
+   1=up,2=left,3=right. Walk-cycle animation matches state.lua's
+   G.panim/G.pframe: 4 frames per direction, stepping to the next one
+   every 10 frames while moving (dt*6 per frame at our fixed ~60fps
+   vblank rate takes 10 frames to cross 1.0, same as the reference),
+   frozen on frame 0 while standing still. main() drives anim_frame
+   the same way G.pframe is driven. */
 static const u16 *const MAX_FRAMES[4][4] = {
     { max_down_1,  max_down_2,  max_down_3,  max_down_4 },
     { max_up_1,    max_up_2,    max_up_3,    max_up_4 },
     { max_left_1,  max_left_2,  max_left_3,  max_left_4 },
     { max_right_1, max_right_2, max_right_3, max_right_4 },
 };
-
-static void draw_player(int cx, int cy, int dir, int anim_frame) {
-    int x = cx - MAX_SPRITE_W / 2, y = cy - MAX_SPRITE_H;
-    blit_sprite(MAX_FRAMES[dir][anim_frame & 3], MAX_SPRITE_W, MAX_SPRITE_H, x, y);
-}
 
 /* ----------------------------------------------------------------------
  * Interact dialogue: full multi-beat sequences from data.TALK.father /
@@ -1470,7 +1536,7 @@ static const char *const DEMO_END[] = {
 #define PORTRAIT_BOX_Y     24
 #define DIALOGUE_TEXT_H    40
 #define DIALOGUE_TEXT_Y    (SCREEN_H - DIALOGUE_TEXT_H)
-#define DIALOGUE_MAX_CHARS ((SCREEN_W - 16) / 8)
+#define DIALOGUE_MAX_CHARS ((SCREEN_W - 16) / CHAR_CELL(DIALOGUE_SCALE))
 #define DIALOGUE_LINE_H    9
 
 /* No background panel -- outlined text (draw_glyph's own 1px black
@@ -2459,28 +2525,41 @@ static int try_encounter(int map_id, int px, int py, int party_n,
  * directly over the battle background/sprites now, just outlined.
  * ---------------------------------------------------------------------- */
 
-/* Four corners, one each: the foe's CryMon and its status box sit in
-   the upper right (sprite flush in the corner, box directly below
-   it, both right-aligned to each other); Max's CryMon and its status
-   box sit in the lower left (sprite flush in the corner, box directly
-   above it); the message/menu box sits in the lower right. BSTATUS_*
-   is shared by both status boxes so they read as a matched pair --
-   narrow enough (98px) that the player's, tucked against the
-   lower-left corner, clears the message/menu box's own left edge
-   with room to spare, so a stacked name/level/HP layout (3 rows)
-   replaces the old wider 2-row one. BCONTENT_W is sized for the item
-   menu's longest row (see draw_battle_item_menu's shortened labels)
-   rather than the full screen, and BCONTENT_H for its tallest phase
-   (the item menu's up to 6 rows). BGAP is the fixed clearance kept
-   between every pair of these four corner elements. */
+/* Four corners, one each: the foe's CryMon sits flush in the upper
+   right with its status box directly below it, right-aligned to the
+   sprite; Max's CryMon sits flush in the lower left; the message/menu
+   box sits in the lower right. BSTATUS_* is shared by both status
+   boxes so they read as a matched pair -- a single row now (name,
+   level and HP all on one line) rather than the old stacked 3-row
+   layout, both sized for that line's worst case ("*NEEDLEROOT LV12
+   87/87", the longest species name/highest level+HP this game's
+   level-12 cap and try_encounter()'s wild-level table ever produce).
+   MONSTER_SPRITE_W/H grew accordingly (56->84) to fill the vertical
+   room a single-row box frees up.
+
+   The single-row box is far wider than the old 98px one -- too wide
+   to sit anywhere BCONTENT_Y..SCREEN_H (BCONTENT claims that whole
+   band from x=BCONTENT_X rightward) without overlapping the
+   message/menu box, so both status boxes are kept above BCONTENT_Y
+   instead of tucked flush against their sprite on every side. The
+   foe's box still sits directly below the foe's sprite (both fit
+   above BCONTENT_Y with room to spare). Max's box cannot also sit
+   directly above Max's sprite without dropping below BCONTENT_Y (Max's
+   sprite is flush against the bottom edge) or colliding with the foe's
+   box if placed in the same row, so it gets its own row further up,
+   still left-aligned toward Max's corner and clear of both. Max's
+   sprite itself stays flush in the true lower-left corner -- its
+   84px width keeps it left of BCONTENT_X regardless of how far down
+   the screen it sits, so it never needs to move for BCONTENT's sake
+   the way the box does. BGAP is the fixed clearance kept between
+   every pair of these elements. */
 #define BGAP          4
 
 #define BFOE_SPRITE_X (SCREEN_W - 8 - MONSTER_SPRITE_W)
 #define BFOE_SPRITE_Y 4
 
-#define BSTATUS_BOX_W 98
-#define BSTATUS_BOX_H 48
-#define BSTATUS_ROW_H 13
+#define BSTATUS_BOX_W 208
+#define BSTATUS_BOX_H 18
 
 #define BFOE_BOX_W    BSTATUS_BOX_W
 #define BFOE_BOX_H    BSTATUS_BOX_H
@@ -2498,7 +2577,7 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 #define BPL_BOX_W     BSTATUS_BOX_W
 #define BPL_BOX_H     BSTATUS_BOX_H
 #define BPL_BOX_X     4
-#define BPL_BOX_Y     (BPL_SPRITE_Y - BGAP - BSTATUS_BOX_H)
+#define BPL_BOX_Y     70
 
 #define BROW_H        16
 
@@ -2540,43 +2619,33 @@ static void draw_battle_sprites(const Battle *b, u32 frame_count) {
                     BPL_SPRITE_X, BPL_SPRITE_Y);
 }
 
+/* One line each -- "*NAME LVxx hp/maxHp" -- sized to BSTATUS_BOX_W's
+   worst case (see the layout comment above). */
 static void draw_battle_status(const Battle *b) {
     char buf[40];
     int n;
 
-    /* Stacked name / level / HP, 3 rows -- BSTATUS_BOX_W (98px) is
-       too narrow for the old 2-row "NAME LVxx" line on the longest
-       species names, now that both status boxes are corner-sized
-       rather than spanning most of the screen width. */
     n = s_cat(buf, 0, b->foe.shiny ? "*" : "");
     n = s_cat(buf, n, SPECIES[b->foe.species].name);
-    buf[n] = 0;
-    draw_text_s(buf, BFOE_BOX_X + 4, BFOE_BOX_Y + 4, 0xFFFF, MENU_SCALE);
-    n = s_cat(buf, 0, "LV");
+    n = s_cat(buf, n, " LV");
     n = s_cat_uint(buf, n, b->foe.lv);
-    buf[n] = 0;
-    draw_text_s(buf, BFOE_BOX_X + 4, BFOE_BOX_Y + 4 + BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
-    n = s_cat(buf, 0, "HP ");
+    n = s_cat(buf, n, " ");
     n = s_cat_uint(buf, n, b->foe.hp);
     n = s_cat(buf, n, "/");
     n = s_cat_uint(buf, n, b->foe.maxHp);
     buf[n] = 0;
-    draw_text_s(buf, BFOE_BOX_X + 4, BFOE_BOX_Y + 4 + 2 * BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
+    draw_text_s(buf, BFOE_BOX_X + 4, BFOE_BOX_Y + 4, 0xFFFF, MENU_SCALE);
 
     n = s_cat(buf, 0, b->pl.shiny ? "*" : "");
     n = s_cat(buf, n, SPECIES[b->pl.species].name);
-    buf[n] = 0;
-    draw_text_s(buf, BPL_BOX_X + 4, BPL_BOX_Y + 4, 0xFFFF, MENU_SCALE);
-    n = s_cat(buf, 0, "LV");
+    n = s_cat(buf, n, " LV");
     n = s_cat_uint(buf, n, b->pl.lv);
-    buf[n] = 0;
-    draw_text_s(buf, BPL_BOX_X + 4, BPL_BOX_Y + 4 + BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
-    n = s_cat(buf, 0, "HP ");
+    n = s_cat(buf, n, " ");
     n = s_cat_uint(buf, n, b->pl.hp);
     n = s_cat(buf, n, "/");
     n = s_cat_uint(buf, n, b->pl.maxHp);
     buf[n] = 0;
-    draw_text_s(buf, BPL_BOX_X + 4, BPL_BOX_Y + 4 + 2 * BSTATUS_ROW_H, 0xFFFF, MENU_SCALE);
+    draw_text_s(buf, BPL_BOX_X + 4, BPL_BOX_Y + 4, 0xFFFF, MENU_SCALE);
 }
 
 static void draw_battle_menu_row(const char *label, int idx, int cur, int y) {
@@ -2762,7 +2831,7 @@ static void draw_battle(const Battle *b, const Bag *bag, u32 frame_count) {
     switch(b->phase) {
         case 0:
             draw_wrapped(b->msg[b->msg_i], BCONTENT_X + 8, BCONTENT_Y + 8,
-                         rgb565(232, 228, 216), MENU_SCALE, BCONTENT_W / 8 - 2, 9);
+                         rgb565(232, 228, 216), MENU_SCALE, BCONTENT_W / CHAR_CELL(MENU_SCALE) - 2, 9);
             break;
         case 1:
             draw_battle_item_menu(b, bag, b->cur);
@@ -2996,7 +3065,8 @@ static void draw_ending(const char *const *lines, int n, int i) {
     vram_clear();
     draw_text_center_s("CRYMON", SCREEN_W / 2, 24, 0xFFFF, 2);
     if(i < n)
-        draw_wrapped(lines[i], 12, 80, rgb565(197, 206, 198), DIALOGUE_SCALE, 37, 9);
+        draw_wrapped(lines[i], 12, 80, rgb565(197, 206, 198), DIALOGUE_SCALE,
+                     (SCREEN_W - 24) / CHAR_CELL(DIALOGUE_SCALE), 9);
     draw_text_center_s("A TO CONTINUE", SCREEN_W / 2, SCREEN_H - 20,
                         rgb565(90, 122, 82), DIALOGUE_SCALE);
 }
@@ -4532,14 +4602,18 @@ void main(void) {
             draw_map(map_id, cam_x, cam_y);
             draw_props(map_id, cam_x, cam_y);
             {
+                WorldSprite ws_list[MAX_WORLD_SPRITES];
+                int ws_n = 0;
                 int mason_frame = (mason_state == 1 || mason_state == 3) ? (int)mason_anim % 4 : 0;
                 int anne_frame = (anne_state == 1 || anne_state == 3) ? (int)anne_anim % 4 : 0;
-                draw_npcs(map_id, cam_x, cam_y, frame_count,
-                          mason_state, mason_x, mason_y, mason_dir, mason_frame,
-                          anne_state, anne_x, anne_y, anne_dir, anne_frame,
-                          cath_caught, soldiers, soldier_beaten);
+                collect_npcs(ws_list, &ws_n, map_id, frame_count,
+                             mason_state, mason_x, mason_y, mason_dir, mason_frame,
+                             anne_state, anne_x, anne_y, anne_dir, anne_frame,
+                             cath_caught, soldiers, soldier_beaten);
+                ws_push(ws_list, &ws_n, MAX_FRAMES[pdir][(anim_counter / 10) & 3],
+                        MAX_SPRITE_W, MAX_SPRITE_H, px, py);
+                ws_sort_and_draw(ws_list, ws_n, cam_x, cam_y);
             }
-            draw_player(px - cam_x, py - cam_y, pdir, anim_counter / 10);
             draw_hud(got_shelf, looted_crate, bag.bandage);
             if(seq_lines)
                 draw_dialogue_box(&seq_lines[seq_beat]);
