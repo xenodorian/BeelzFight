@@ -94,7 +94,7 @@ MONSTERS = [
     'briarfox', 'fenwisp', 'duskhorn', 'needleroot', 'cathleen', 'crymare',
 ]
 MONSTER_FRAMES = [1, 2, 3, 4]
-MONSTER_W, MONSTER_H = 84, 84
+MONSTER_W, MONSTER_H = 64, 64
 
 # render.lua's drawBattle() draws this (sprites.lua's "bg" key) behind
 # everything else, full-screen, before the status boxes and menu; the

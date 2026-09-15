@@ -382,22 +382,19 @@ static const uint8_t glyph_exclaim[8] = {
     0b00011000, 0, 0b00011000, 0,
 };
 
-/* Every text call draws bold with a 2px black outline instead of
-   sitting on an opaque box (see the now-boxless draw_dialogue_box/
+/* Every text call draws with a 2px black outline instead of sitting
+   on an opaque box (see the now-boxless draw_dialogue_box/
    draw_menu_frame/draw_box/draw_hud_toast below).
-   BOLD_DX/DY draw the real color 4 times (0,0)/(1,0)/(0,1)/(1,1) --
-   a diagonal faux-bold thickening a plain single-pixel-stroke bitmap
-   font actually needs, since just moving it 1px right alone leaves
-   verticals in "OIL"-type glyphs looking thin from the top/bottom.
-   OUTLINE_DX/DY is a full 2px ring (every offset from -2..2 except
+   The outline is a full 2px ring (every offset from -2..2 except
    (0,0), 24 of them) drawn in black first so the border has no
-   gaps at glyph corners even at that thickness. Costs ~25x the fill
-   work per glyph over the original single-pass version, but glyphs
-   are tiny (8x8) and this only runs for on-screen text. */
+   gaps at glyph corners even at that thickness, then the glyph
+   itself is drawn once on top in the real color (not bold -- see
+   git history for the bold faux-thickening pass this replaced).
+   Costs ~24x the fill work per glyph over the original single-pass
+   version, but glyphs are tiny (8x8) and this only runs for
+   on-screen text. */
 static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int scale) {
-    static const int BOLD_DX[4] = { 0, 1, 0, 1 };
-    static const int BOLD_DY[4] = { 0, 0, 1, 1 };
-    int row, col, sx, sy, k, dx, dy;
+    int row, col, sx, sy, dx, dy;
 
     for(dy = -2; dy <= 2; dy++) {
         for(dx = -2; dx <= 2; dx++) {
@@ -417,19 +414,17 @@ static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int s
         }
     }
 
-    for(k = 0; k < 4; k++) {
-        for(row = 0; row < 8; row++) {
-            uint8_t bits = bitmap[row];
+    for(row = 0; row < 8; row++) {
+        uint8_t bits = bitmap[row];
 
-            for(col = 0; col < 8; col++) {
-                if(!(bits & (0x80 >> col)))
-                    continue;
+        for(col = 0; col < 8; col++) {
+            if(!(bits & (0x80 >> col)))
+                continue;
 
-                for(sy = 0; sy < scale; sy++)
-                    for(sx = 0; sx < scale; sx++)
-                        put_pixel(ox + col * scale + sx + BOLD_DX[k],
-                                  oy + row * scale + sy + BOLD_DY[k], color);
-            }
+            for(sy = 0; sy < scale; sy++)
+                for(sx = 0; sx < scale; sx++)
+                    put_pixel(ox + col * scale + sx,
+                              oy + row * scale + sy, color);
         }
     }
 }
@@ -1793,9 +1788,9 @@ typedef struct {
 /* No background panel -- outlined text reads fine directly over
    whatever's behind the menu (the world scene, since draw_bag_menu/
    draw_party_menu/draw_shop are all drawn as an overlay after it). */
-static void draw_menu_frame(const char *title) {
+static void draw_menu_frame(const char *title, const char *footer) {
     draw_text_s(title, MENU_X + 8, MENU_Y + 8, 0xFFFF, MENU_SCALE);
-    draw_text_s("B CLOSE", MENU_X + 8, MENU_Y + MENU_H - 16,
+    draw_text_s(footer, MENU_X + 8, MENU_Y + MENU_H - 16,
                 rgb565(180, 220, 170), MENU_SCALE);
 }
 
@@ -1808,23 +1803,41 @@ static const u16 *const ITEM_ICONS[5] = {
     icon_salve, icon_bandage, icon_bitterroot, icon_dust, icon_gem
 };
 
-static void draw_bag_row(const u16 *icon, const char *label, int count, int y) {
-    char buf[32];
-    int n = s_cat(buf, 0, label);
+/* Effect text is stripped out of the row's own title now (matching
+   the battle item menu below) and only drawn when the row is the one
+   under the cursor, so the list reads as plain item names/counts
+   until the player actually navigates onto one. */
+static const char *const ITEM_EFFECT_DESC[5] = {
+    "+22 HP", "+12 HP", "STR+4", "-3/-2/-2", "CATCH"
+};
+
+static void draw_bag_row(const u16 *icon, const char *label, int count,
+                          int idx, int cur, int y) {
+    char buf[48];
+    int n;
+    u16 color = (idx == cur) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
+
+    draw_text_s(idx == cur ? ">" : " ", MENU_X + 8, y, color, MENU_SCALE);
+    if(icon)
+        blit_sprite(icon, ITEM_ICON_W, ITEM_ICON_H, MENU_X + 16, y - 1);
+
+    n = s_cat(buf, 0, label);
     n = s_cat(buf, n, " X");
     n = s_cat_uint(buf, n, count);
+    if(idx == cur) {
+        n = s_cat(buf, n, "  ");
+        n = s_cat(buf, n, ITEM_EFFECT_DESC[idx]);
+    }
     buf[n] = 0;
-    if(icon)
-        blit_sprite(icon, ITEM_ICON_W, ITEM_ICON_H, MENU_X + 8, y - 1);
-    draw_text_s(buf, MENU_X + 8 + ITEM_ICON_W + 4, y, rgb565(232, 228, 216), MENU_SCALE);
+    draw_text_s(buf, MENU_X + 16 + ITEM_ICON_W + 4, y, color, MENU_SCALE);
 }
 
-static void draw_bag_menu(const Bag *bag, int marks) {
+static void draw_bag_menu(const Bag *bag, int marks, int cur) {
     int y = MENU_Y + 24;
     char marks_buf[16];
     int n;
 
-    draw_menu_frame("BAG");
+    draw_menu_frame("BAG", "UP/DOWN A USE  B CLOSE");
 
     n = s_cat(marks_buf, 0, "MARKS ");
     n = s_cat_uint(marks_buf, n, marks);
@@ -1832,11 +1845,11 @@ static void draw_bag_menu(const Bag *bag, int marks) {
     draw_text_s(marks_buf, MENU_X + MENU_W - 8 - text_width_s(marks_buf, MENU_SCALE),
                 MENU_Y + 8, rgb565(143, 74, 64), MENU_SCALE);
 
-    draw_bag_row(icon_salve, "MOSS SALVE", bag->salve, y);            y += MENU_ROW_H;
-    draw_bag_row(icon_bandage, "LINEN WRAP", bag->bandage, y);        y += MENU_ROW_H;
-    draw_bag_row(icon_bitterroot, "BITTERROOT", bag->bitterroot, y);  y += MENU_ROW_H;
-    draw_bag_row(icon_dust, "ASH DUST", bag->dust, y);                y += MENU_ROW_H;
-    draw_bag_row(icon_gem, "CAPTURE CRYSTAL", bag->gem, y);
+    draw_bag_row(icon_salve, "MOSS SALVE", bag->salve, 0, cur, y);            y += MENU_ROW_H;
+    draw_bag_row(icon_bandage, "LINEN WRAP", bag->bandage, 1, cur, y);        y += MENU_ROW_H;
+    draw_bag_row(icon_bitterroot, "BITTERROOT", bag->bitterroot, 2, cur, y);  y += MENU_ROW_H;
+    draw_bag_row(icon_dust, "ASH DUST", bag->dust, 3, cur, y);                y += MENU_ROW_H;
+    draw_bag_row(icon_gem, "CAPTURE CRYSTAL", bag->gem, 4, cur, y);
 }
 
 /* drawParty(): lists every party member (up to data.PARTY_MAX -- see
@@ -1846,10 +1859,84 @@ static void draw_bag_menu(const Bag *bag, int marks) {
    (main()'s menu_mode==2 input handling), matching the reference's
    own Digit1-6 hotkeys adapted to a dpad+cursor since there's no
    number row on a Dreamcast pad. */
-static void draw_party_menu(const Monster *party, int party_n, int lead, int party_cur) {
+/* Y opens this from the list for whichever row party_cur is on --
+   attacks (basic/special, or the full spell list for a caster like
+   Cathleen), stats, and where the CryMon sits in the party order
+   (main()'s menu_mode==2 input handling keeps party_cur live under
+   up/down while this is open, so browsing the whole party doesn't
+   need to back out to the list each time). */
+static void draw_party_detail(const Monster *party, int party_n, int idx) {
+    const Monster *m = &party[idx];
+    const Species *s = &SPECIES[m->species];
+    char buf[48];
+    int n, y = MENU_Y + 24;
+
+    draw_menu_frame("CRYMON", "UP/DOWN SWITCH  B BACK");
+
+    n = s_cat(buf, 0, m->shiny ? "SHINY " : "");
+    n = s_cat(buf, n, s->name);
+    buf[n] = 0;
+    draw_text_s(buf, MENU_X + 8, y, 0xFFFF, MENU_SCALE); y += MENU_ROW_H;
+
+    n = s_cat(buf, 0, "LV");
+    n = s_cat_uint(buf, n, m->lv);
+    n = s_cat(buf, n, "  HP ");
+    n = s_cat_uint(buf, n, m->hp);
+    n = s_cat(buf, n, "/");
+    n = s_cat_uint(buf, n, m->maxHp);
+    buf[n] = 0;
+    draw_text_s(buf, MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE); y += MENU_ROW_H;
+
+    n = s_cat(buf, 0, "STR ");
+    n = s_cat_uint(buf, n, m->str);
+    n = s_cat(buf, n, "  AGL ");
+    n = s_cat_uint(buf, n, m->agl);
+    n = s_cat(buf, n, "  SPC ");
+    n = s_cat_uint(buf, n, m->spc);
+    buf[n] = 0;
+    draw_text_s(buf, MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE); y += MENU_ROW_H * 2;
+
+    draw_text_s("ATTACKS", MENU_X + 8, y, rgb565(180, 220, 170), MENU_SCALE); y += MENU_ROW_H;
+    if(s->spells_n > 0) {
+        static const char *const SPELL_MENU_NAME[4] = {
+            "FIRE BOLT", "ICE BEAM", "LIGHTNING STRIKE", "MANA SURGE"
+        };
+        int i;
+        for(i = 0; i < s->spells_n; i++) {
+            draw_text_s(SPELL_MENU_NAME[s->spells[i]], MENU_X + 8, y,
+                        rgb565(232, 228, 216), MENU_SCALE);
+            y += MENU_ROW_H;
+        }
+    }
+    else {
+        draw_text_s(s->basic, MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE); y += MENU_ROW_H;
+        draw_text_s(s->special, MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE); y += MENU_ROW_H;
+        if(m->shiny) {
+            draw_text_s("TOXIC BURST", MENU_X + 8, y, rgb565(232, 228, 216), MENU_SCALE);
+            y += MENU_ROW_H;
+        }
+    }
+    y += MENU_ROW_H;
+
+    n = s_cat(buf, 0, "ORDER ");
+    n = s_cat_uint(buf, n, idx + 1);
+    n = s_cat(buf, n, " OF ");
+    n = s_cat_uint(buf, n, party_n);
+    buf[n] = 0;
+    draw_text_s(buf, MENU_X + 8, y, rgb565(180, 220, 170), MENU_SCALE);
+
+}
+
+static void draw_party_menu(const Monster *party, int party_n, int lead, int party_cur,
+                             int party_detail) {
     int y = MENU_Y + 24;
 
-    draw_menu_frame("CRYMON");
+    if(party_detail && party_n > 0) {
+        draw_party_detail(party, party_n, party_cur);
+        return;
+    }
+
+    draw_menu_frame("CRYMON", "B CLOSE");
 
     if(party_n > 0) {
         int i;
@@ -1870,7 +1957,7 @@ static void draw_party_menu(const Monster *party, int party_n, int lead, int par
             draw_text_s(buf, MENU_X + 8, y, color, MENU_SCALE);
             y += MENU_ROW_H;
         }
-        draw_text_s("A LEAD  B CLOSE", MENU_X + 8, MENU_Y + MENU_H - 16,
+        draw_text_s("A LEAD  Y VIEW", MENU_X + 8, MENU_Y + MENU_H - 32,
                     rgb565(138, 134, 120), MENU_SCALE);
     }
     else {
@@ -2525,34 +2612,31 @@ static int try_encounter(int map_id, int px, int py, int party_n,
  * directly over the battle background/sprites now, just outlined.
  * ---------------------------------------------------------------------- */
 
-/* Four corners, one each: the foe's CryMon sits flush in the upper
-   right with its status box directly below it, right-aligned to the
-   sprite; Max's CryMon sits flush in the lower left; the message/menu
-   box sits in the lower right. BSTATUS_* is shared by both status
-   boxes so they read as a matched pair -- a single row now (name,
-   level and HP all on one line) rather than the old stacked 3-row
-   layout, both sized for that line's worst case ("*NEEDLEROOT LV12
-   87/87", the longest species name/highest level+HP this game's
-   level-12 cap and try_encounter()'s wild-level table ever produce).
-   MONSTER_SPRITE_W/H grew accordingly (56->84) to fill the vertical
-   room a single-row box frees up.
+/* The foe's CryMon sits flush in the upper right, its status box
+   directly below it, right-aligned to the sprite. Max's CryMon sits
+   flush in the lower left, sprite only -- Max's status box is stacked
+   directly beneath the foe's box instead (same column, same width),
+   so both single-line readouts read together as one pair up top
+   rather than one being tucked against Max's own corner. The
+   message/menu box sits in the lower right. BSTATUS_* is shared by
+   both status boxes -- a single row (name, level and HP all on one
+   line), sized for that line's worst case ("*NEEDLEROOT LV12 87/87",
+   the longest species name/highest level+HP this game's level-12 cap
+   and try_encounter()'s wild-level table ever produce).
 
-   The single-row box is far wider than the old 98px one -- too wide
+   Both boxes are far wider than the old 98px corner boxes -- too wide
    to sit anywhere BCONTENT_Y..SCREEN_H (BCONTENT claims that whole
    band from x=BCONTENT_X rightward) without overlapping the
-   message/menu box, so both status boxes are kept above BCONTENT_Y
-   instead of tucked flush against their sprite on every side. The
-   foe's box still sits directly below the foe's sprite (both fit
-   above BCONTENT_Y with room to spare). Max's box cannot also sit
-   directly above Max's sprite without dropping below BCONTENT_Y (Max's
-   sprite is flush against the bottom edge) or colliding with the foe's
-   box if placed in the same row, so it gets its own row further up,
-   still left-aligned toward Max's corner and clear of both. Max's
-   sprite itself stays flush in the true lower-left corner -- its
-   84px width keeps it left of BCONTENT_X regardless of how far down
-   the screen it sits, so it never needs to move for BCONTENT's sake
-   the way the box does. BGAP is the fixed clearance kept between
-   every pair of these elements. */
+   message/menu box, so the whole sprite+box+box stack (foe sprite,
+   foe box, Max's box) is kept above BCONTENT_Y. MONSTER_SPRITE_W/H is
+   sized to leave room for that stack (sprite, then two stacked
+   single-line boxes, then BGAP clearance above BCONTENT_Y) while
+   still reading as a clear size bump over the original 56px sprite.
+   Max's own sprite isn't part of that stack -- its 64px width keeps
+   it left of BCONTENT_X regardless of how far down the screen it
+   sits, so it stays flush in the true lower-left corner, independent
+   of where Max's box ended up. BGAP is the fixed clearance kept
+   between every pair of these elements. */
 #define BGAP          4
 
 #define BFOE_SPRITE_X (SCREEN_W - 8 - MONSTER_SPRITE_W)
@@ -2576,8 +2660,8 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 
 #define BPL_BOX_W     BSTATUS_BOX_W
 #define BPL_BOX_H     BSTATUS_BOX_H
-#define BPL_BOX_X     4
-#define BPL_BOX_Y     70
+#define BPL_BOX_X     BFOE_BOX_X
+#define BPL_BOX_Y     (BFOE_BOX_Y + BSTATUS_BOX_H + BGAP)
 
 #define BROW_H        16
 
@@ -2704,38 +2788,47 @@ static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
 
     draw_battle_menu_row("PASS", i++, cur, y); y += MENU_ROW_H;
 
-    /* Shortened from the bag menu's own full labels (MOSS SALVE UP TO
-       22 HP, etc.) -- BCONTENT_W is sized for these now that the box
-       is no longer full-screen-width, see the layout comment above. */
+    /* Just the name and count now -- the effect (how much it heals/
+       buffs/debuffs, or the live capture chance) only appears on the
+       row the cursor is actually sitting on, matching the bag menu's
+       own ITEM_EFFECT_DESC treatment, instead of being baked into
+       every row's title whether it's selected or not. */
     if(bag->salve > 0) {
-        n = s_cat(buf, 0, "SALVE +22HP X");
+        n = s_cat(buf, 0, "SALVE X");
         n = s_cat_uint(buf, n, bag->salve);
+        if(i == cur) n = s_cat(buf, n, "  +22HP");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->bandage > 0) {
-        n = s_cat(buf, 0, "WRAP +12HP X");
+        n = s_cat(buf, 0, "WRAP X");
         n = s_cat_uint(buf, n, bag->bandage);
+        if(i == cur) n = s_cat(buf, n, "  +12HP");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->bitterroot > 0) {
-        n = s_cat(buf, 0, "BITTERROOT STR+4 X");
+        n = s_cat(buf, 0, "BITTERROOT X");
         n = s_cat_uint(buf, n, bag->bitterroot);
+        if(i == cur) n = s_cat(buf, n, "  STR+4");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->dust > 0) {
-        n = s_cat(buf, 0, "DUST -3/-2/-2 X");
+        n = s_cat(buf, 0, "DUST X");
         n = s_cat_uint(buf, n, bag->dust);
+        if(i == cur) n = s_cat(buf, n, "  -3/-2/-2");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->gem > 0) {
-        n = s_cat(buf, 0, "CRYSTAL ");
-        n = s_cat_uint(buf, n, battle_capture_chance(b));
-        n = s_cat(buf, n, " PCT X");
+        n = s_cat(buf, 0, "CRYSTAL X");
         n = s_cat_uint(buf, n, bag->gem);
+        if(i == cur) {
+            n = s_cat(buf, n, "  ");
+            n = s_cat_uint(buf, n, battle_capture_chance(b));
+            n = s_cat(buf, n, " PCT");
+        }
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
@@ -3027,7 +3120,7 @@ static void draw_shop(const Bag *bag, int marks, int sell_tab, int cur) {
     int i;
     char buf[16];
 
-    draw_menu_frame("BRAMS STALL");
+    draw_menu_frame("BRAMS STALL", "B CLOSE");
 
     draw_text_s(sell_tab ? "BUY  >SELL" : ">BUY  SELL", MENU_X + 8, MENU_Y + 24,
                 rgb565(197, 206, 198), MENU_SCALE);
@@ -3161,6 +3254,8 @@ void main(void) {
        need a second meaning while a menu is open). */
     int menu_mode = 0;
     int party_cur = 0; /* cursor row inside the party menu */
+    int party_detail = 0; /* party menu: 0 list, 1 viewing party_cur's detail */
+    int bag_cur = 0; /* cursor row inside the bag menu */
 
     /* HUD toast, matching state.lua's G.hud/G.hudT/note(): a small
        banner (lead-switch confirmation, the post-win "grew to lv N"/
@@ -3364,7 +3459,7 @@ void main(void) {
                 party_n = 0; lead = 0;
                 in_battle = 0;
                 enc_lock = 8; last_tx = -1; last_ty = -1;
-                menu_mode = 0; party_cur = 0;
+                menu_mode = 0; party_cur = 0; party_detail = 0; bag_cur = 0;
                 hud_flash[0] = 0; hud_t = 0;
                 seq_lines = 0; seq_len = 0; seq_beat = 0;
                 post_action = POST_NONE; post_soldier_id = 0;
@@ -3391,16 +3486,63 @@ void main(void) {
             }
         }
         else if(menu_mode) {
-            /* state.lua's MODE.BAG/MODE.PARTY update: BAG has no
-               cursor/use logic in the reference either (items are
-               only usable from the battle item menu), but PARTY does
-               -- cycleParty(to), ported below. */
-            if(menu_mode == 2 && party_n > 0) {
+            /* MODE.BAG/MODE.PARTY update. BAG now has its own
+               cursor/use logic (up/down picks a row, A uses it --
+               salve/wrap heal the lead directly; bitterroot/dust/gem
+               are battle-only mods with nothing to apply outside one,
+               so A just says so). PARTY still has cycleParty(to) (A
+               sets the lead), plus Y now opens a detail view for
+               party_cur (attacks, stats, party order) that up/down
+               keeps browsing live and B backs out of before closing
+               the menu itself. */
+            if(menu_mode == 1) {
+                if(up_now && !prev_up)
+                    bag_cur = (bag_cur - 1 + ITEM_COUNT) % ITEM_COUNT;
+                if(down_now && !prev_down)
+                    bag_cur = (bag_cur + 1) % ITEM_COUNT;
+                if(a_now && !prev_a) {
+                    int *count = bag_field(&bag, bag_cur);
+                    int n = 0;
+                    if(*count <= 0) {
+                        n = s_cat(hud_flash, 0, "NONE LEFT");
+                    }
+                    else if(bag_cur == 0 || bag_cur == 1) {
+                        /* salve, bandage: only healing items that mean
+                           anything outside a battle. */
+                        if(party_n <= 0 || party[lead].hp <= 0) {
+                            n = s_cat(hud_flash, 0, "NO CRYMON TO HEAL");
+                        }
+                        else if(party[lead].hp >= party[lead].maxHp) {
+                            n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
+                            n = s_cat(hud_flash, n, " IS AT FULL HP");
+                        }
+                        else {
+                            int heal = party[lead].maxHp - party[lead].hp;
+                            int cap = (bag_cur == 0) ? 22 : 12;
+                            if(heal > cap) heal = cap;
+                            party[lead].hp += heal;
+                            (*count)--;
+                            n = s_cat(hud_flash, 0, SPECIES[party[lead].species].name);
+                            n = s_cat(hud_flash, n, " HEALED ");
+                            n = s_cat_uint(hud_flash, n, heal);
+                            n = s_cat(hud_flash, n, " HP");
+                        }
+                    }
+                    else {
+                        n = s_cat(hud_flash, 0, "ONLY USABLE IN BATTLE");
+                    }
+                    hud_flash[n] = 0;
+                    hud_t = HUD_NOTE_FRAMES;
+                }
+            }
+            else if(menu_mode == 2 && party_n > 0) {
                 if(up_now && !prev_up)
                     party_cur = (party_cur - 1 + party_n) % party_n;
                 if(down_now && !prev_down)
                     party_cur = (party_cur + 1) % party_n;
-                if(a_now && !prev_a) {
+                if(y_now && !prev_y)
+                    party_detail = !party_detail;
+                if(a_now && !prev_a && !party_detail) {
                     if(party[party_cur].hp > 0 && party_cur != lead) {
                         int n;
                         lead = party_cur;
@@ -3411,7 +3553,13 @@ void main(void) {
                     }
                 }
             }
-            if((b_now && !prev_b) || (start_now && !prev_start))
+            if(b_now && !prev_b) {
+                if(menu_mode == 2 && party_detail)
+                    party_detail = 0;
+                else
+                    menu_mode = 0;
+            }
+            else if(start_now && !prev_start)
                 menu_mode = 0;
         }
         else if(in_battle) {
@@ -4578,10 +4726,14 @@ void main(void) {
                reaches selectPressed()/startPressed() outside TALK/
                BATTLE/etc, which here just means no dialogue active). */
             if(!seq_lines && fade_state == FADE_NONE) {
-                if(y_now && !prev_y)
+                if(y_now && !prev_y) {
                     menu_mode = 1;
-                else if(start_now && !prev_start)
+                    bag_cur = 0;
+                }
+                else if(start_now && !prev_start) {
                     menu_mode = 2;
+                    party_detail = 0;
+                }
             }
         }
 
@@ -4620,9 +4772,9 @@ void main(void) {
             else if(hud_t > 0)
                 draw_hud_toast(hud_flash);
             if(menu_mode == 1)
-                draw_bag_menu(&bag, marks);
+                draw_bag_menu(&bag, marks, bag_cur);
             else if(menu_mode == 2)
-                draw_party_menu(party, party_n, lead, party_cur);
+                draw_party_menu(party, party_n, lead, party_cur, party_detail);
             if(in_battle)
                 draw_battle(&battle, &bag, frame_count);
             if(shop_open)
