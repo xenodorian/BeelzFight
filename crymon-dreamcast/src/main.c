@@ -9,8 +9,9 @@
  * between them, the starting room's props and Quillpup/bandage
  * grants, every VELD/FOREST/GROVE NPC and pickup, the full turn-based
  * battle system (attack/special-minigame/guard/items/capture/XP),
- * wild encounters, Bram's shop, and both endings (Calder/ENDING_WIN,
- * Shinigami/DEMO_END). Each major system's own section comment below
+ * wild encounters, Bram's shop, and the single ending (DEMO_END,
+ * reached via the Grove/Shinigami/Anne chain and the resurrection
+ * choice -- see draw_choice()). Each major system's own section comment below
  * (search for "----" banners) cites the exact Lua functions/tables it
  * ports and any formula it reproduces verbatim.
  *
@@ -39,7 +40,7 @@
  *   - Dialogue/UI text is upper-cased to fit this port's own hand-
  *     authored 8x8 bitmap font (no lowercase glyph set -- a real
  *     mixed-case font is its own separate undertaking), but every
- *     every TALK_* array (and ENDING_WIN/DEMO_END) now carries the reference's own
+ *     every TALK_* array (and DEMO_END) now carries the reference's own
  *     punctuation (apostrophes, periods, commas, question/exclamation
  *     marks -- see glyph_apostrophe/period/comma/question/exclaim
  *     near draw_glyph). Characters this font still can't render
@@ -245,13 +246,40 @@ static u16 shiny_tint(u16 c) {
     return (u16)((b << 11) | (g2 << 5) | r);
 }
 
-static void blit_sprite_shiny(const u16 *px, int w, int h, int x, int y) {
-    int sx, sy;
-    for(sy = 0; sy < h; sy++) {
+/* Battle enter/faint animation: one blitter used for both, driven by
+   two independent params instead of two separate effects, so a
+   battle sprite always renders through the same code whether it's
+   idle, entering, or fainting. `revealed` (0..h) only draws that many
+   rows counted up from the BOTTOM of the sprite -- at revealed==h
+   it's a plain full blit, at revealed==0 nothing draws, and animating
+   it 0->h over a few frames reads as the CryMon rising up into place
+   (used when a fresh monster -- a new battle, or a bench swap-in --
+   first appears). `fade` (0..16) scales every channel down toward
+   black like apply_fade's screen-wide version, but per-sprite;
+   animating it 16->0 reads as the CryMon fainting. The two are
+   independent so idle draws (revealed=h, fade=16) are just the old
+   plain blit_sprite/blit_sprite_shiny with extra math that folds
+   away. */
+static void blit_sprite_anim(const u16 *px, int w, int h, int x, int y,
+                              int shiny, int revealed, int fade) {
+    int sx, sy, start;
+    if(revealed < 0) revealed = 0;
+    if(revealed > h) revealed = h;
+    if(fade < 0) fade = 0;
+    if(fade > 16) fade = 16;
+    start = h - revealed;
+    for(sy = start; sy < h; sy++) {
         for(sx = 0; sx < w; sx++) {
             u16 c = px[sy * w + sx];
-            if(c != SPRITE_KEY)
-                put_pixel(x + sx, y + sy, shiny_tint(c));
+            if(c == SPRITE_KEY) continue;
+            if(shiny) c = shiny_tint(c);
+            if(fade < 16) {
+                u16 r = (u16)((((c >> 11) & 0x1Fu) * (u32)fade) / 16u);
+                u16 g = (u16)((((c >> 5) & 0x3Fu) * (u32)fade) / 16u);
+                u16 b = (u16)(((c & 0x1Fu) * (u32)fade) / 16u);
+                c = (u16)((r << 11) | (g << 5) | b);
+            }
+            put_pixel(x + sx, y + sy, c);
         }
     }
 }
@@ -685,6 +713,16 @@ static const char *const map_house_rows[] = {
     "HHHHHHDHHHHHHH",
 };
 
+/* Four decorative HH-block houses added beyond Max's own (row2-3's
+   HHHH/HDH) so the town reads as populated rather than a single house
+   in a field -- plain solid blocks with no door tile, so they're
+   walk-into-blocked (tile_is_solid's 'H') but never interactive
+   (near_mark/closest_mark only fire on the letter marks below, none
+   of which sit on these blocks). The Camp door ('F') moved off the
+   main N-S corridor onto its own west-branching spur at row 20
+   instead of sitting inline directly above the Forest exit ('Z') on
+   the exact same column, so the two are visibly two different forks
+   off the same path rather than two doors stacked on one corridor. */
 static const char *const map_veld_rows[] = {
     "##############################",
     "####..........RRRR..........##",
@@ -695,18 +733,18 @@ static const char *const map_veld_rows[] = {
     "##...TTT....===,===....TTT...#",
     "##....M......=====....**.....#",
     "##.V.TTT......===......TTT...#",
-    "##............===............#",
-    "###....X...J.=====...........#",
+    "##.HHH........===.......HHH..#",
+    "###HHH.X...J.=====......HHH..#",
     "##...TTT......===............#",
     "##............===.......L....#",
     "##...TTT.....=====......TTT..#",
-    "##............===......^^....#",
-    "##....TTT....=====......TTT..#",
+    "##............===.HHH..^^....#",
+    "##....TTT....=====HHH...TTT..#",
     "##....TTT.....===......TTT...#",
-    "##............===............#",
-    "##...........=====.....NNNN..#",
+    "##HHH.........===............#",
+    "##HHH........=====.....NNNN..#",
     "##............===.......NE...#",
-    "##............=F=............#",
+    "##......F========............#",
     "###...........===...........##",
     "#############=Z=##############",
 };
@@ -758,17 +796,17 @@ static const char *const map_grove_rows[] = {
     "##########################",
 };
 
-/* CryTown's front-line camp -- the place NPC dialogue names repeatedly
+/* The Weeping Army's forward camp -- the invading force occupying
+   Crytown's own front line, the place NPC dialogue names repeatedly
    ("the camp takes strays", "south is the camp", "camp took my
-   Crymon", the cart's camp letter) but that never existed as an
-   actual location: Calder's own fight was the closest thing to it,
-   standing at the edge of VELD guarding the way south. Gated behind
-   beating him (VELD's new 'F' door tile, tile_blocked() below), so
-   the geography now matches what everyone's been saying: you cannot
-   reach the camp until Calder's out of the way. The camp commander
-   (mark 'I', reusing the soldier sprite -- there's no dedicated
-   commander art) is what used to instantly show ENDING_WIN the moment
-   Calder fell; see POST_ENDING_WIN further down. */
+   Crymon", the cart's camp letter). Calder guards the road to it,
+   standing at the edge of VELD; the camp itself is gated behind
+   beating him (VELD's 'F' door tile, tile_blocked() below), so the
+   geography matches what everyone's been saying: you cannot reach
+   the camp until Calder's out of the way. The officer inside (mark
+   'I', reusing the soldier sprite -- there's no dedicated commander
+   art) is a taunt and a redirect toward the Grove, not an ending --
+   see its trigger site further down. */
 static const char *const map_camp_rows[] = {
     "################",
     "#######D########",
@@ -814,7 +852,11 @@ static int tile_is_solid(char ch) {
    (data.isSolidTile has no 'D'), but state.lua blocks it in the
    collision check itself until Cathleen is caught -- now that
    Cathleen is a real, catchable GROVE fight in this port, this gate
-   is ported too instead of staying an open door. */
+   is ported too instead of staying an open door. The story now has
+   her relinquish the door's key on any win against her, capture or
+   not (both call sites below OR beat_cathleen into the cath_caught
+   param), so the 3rd param here still just means "the key is hers to
+   give" regardless of which flag actually earned it. */
 static int tile_blocked(int map_id, char ch, int cath_caught, int beat_calder) {
     if(tile_is_solid(ch)) return 1;
     if(map_id == MAP_GROVE && ch == 'D' && !cath_caught) return 1;
@@ -1115,7 +1157,8 @@ static const u16 *const SHINIGAMI_FRAMES[4] = { npc_shinigami_1, npc_shinigami_2
 static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
                           int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
                           int anne_state, float anne_x, float anne_y, int anne_dir, int anne_frame,
-                          int cath_caught, const Soldier *soldiers, const int *soldier_beaten) {
+                          int cath_caught, int beat_shin,
+                          const Soldier *soldiers, const int *soldier_beaten) {
     if(map_id == MAP_VELD) {
         ws_push_mark_idle(list, n, map_id, 'K', WREN_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
         ws_push_mark_idle(list, n, map_id, 'I', MAE_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
@@ -1138,7 +1181,8 @@ static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
         }
     }
     else if(map_id == MAP_GROVE) {
-        ws_push_mark_idle(list, n, map_id, '9', SHINIGAMI_FRAMES, frame_count, 20, NPC_SPRITE_W, NPC_SPRITE_H);
+        if(!beat_shin)
+            ws_push_mark_idle(list, n, map_id, '9', SHINIGAMI_FRAMES, frame_count, 20, NPC_SPRITE_W, NPC_SPRITE_H);
         if(!cath_caught)
             ws_push_mark(list, n, map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H);
     }
@@ -1251,10 +1295,16 @@ static const Portrait SPEAKER_PORTRAIT[13] = {
     { port_shinigami, PORT_SHINIGAMI_W, PORT_SHINIGAMI_H },
 };
 
+/* The game's very first dialogue -- carries the CryMon = Crystal
+   Monster explanation the player needs before anything else makes
+   sense, plus the Weeping Army as the actual threat (not just "a
+   war"). */
 static const TalkBeat TALK_FATHER[] = {
-    { "THERE'S A WAR. CRYTOWN IS ALREADY BLEEDING.", SPK_MAX },
-    { "YOU'RE TOO SICK TO DEFEND IT FROM THE SOLDIERS. I KNOW THAT.", SPK_MAX },
-    { "SO I'M STEALING YOUR CRYMON.", SPK_MAX },
+    { "THE WEEPING ARMY IS AT OUR GATES, FATHER.", SPK_MAX },
+    { "THEY BURN WHAT THEY DON'T STEAL. CRYTOWN IS ALREADY BLEEDING.", SPK_MAX },
+    { "YOU'RE TOO SICK TO FIGHT THEM. I KNOW THAT.", SPK_MAX },
+    { "SO I'M TAKING YOUR CRYMON. YOUR CRYSTAL MONSTER.", SPK_MAX },
+    { "IT SLEEPS INSIDE THE CRYSTAL UNTIL SOMEONE CRACKS IT OPEN.", SPK_MAX },
     { "FATHER DOES NOT WAKE. THE CAPTURE CRYSTAL IS STILL ON THE SHELF.", SPK_NONE },
 };
 static const TalkBeat TALK_FATHER_AFTER[] = {
@@ -1281,54 +1331,42 @@ static const TalkBeat TALK_CRATE_EMPTY[] = {
     { "SPLINTERS AND A MOTH. EMPTY.", SPK_MAX },
 };
 
-/* Door/warp flavor lines, data.TALK.doorLocked/doorOut/cottage/
-   forestEnter/forestLeave/groveEnter/groveLeave. doorOut's original
-   also kicks off the Mason NPC encounter (masonPh) the first time you
-   leave the house; that's NPC/battle content not built yet, so this
-   step always shows doorOut's plain flavor text instead. */
+/* Door/warp flavor lines: only the locked-door failure message is a
+   real interaction now. Every other door/warp tile used to show a
+   one-line ENTER/LEAVE flavor beat here (data.TALK.doorOut/cottage/
+   forestEnter/forestLeave/groveEnter/groveLeave) -- those are gone in
+   favor of draw_map_banner()'s plain fade in/out map-name banner
+   (do_warp() arms it directly), so a map transition is never a
+   dialogue box the player has to press A through. */
 static const TalkBeat TALK_DOOR_LOCKED[] = {
     { "NOT YET. FATHER'S CRYMON IS STILL ON THE SHELF.", SPK_MAX },
 };
-static const TalkBeat TALK_DOOR_OUT[] = {
-    { "NIGHT AIR. I CAN DO THIS.", SPK_MAX },
-    { "TALL GRASS HIDES CRYMON. WREN WEST. POND EAST. BRAM ON THE PATH. CALDER SOUTH.", SPK_NONE },
-};
-static const TalkBeat TALK_COTTAGE[] = {
-    { "THE COTTAGE. FATHER IN THE BED. MY BED. SOUTH DOOR LEAVES.", SPK_MAX },
-};
-static const TalkBeat TALK_FOREST_ENTER[] = {
-    { "THE TREES CLOSE OVER THE PATH.", SPK_MAX },
-    { "TALL GRASS. PATROLS. IF THEY SEE YOU, THEY WILL COME. THE PATH KEEPS SOUTH.", SPK_NONE },
-};
-static const TalkBeat TALK_FOREST_LEAVE[] = {
-    { "BACK TOWARD THE COTTAGE PATH.", SPK_MAX },
-};
-static const TalkBeat TALK_GROVE_ENTER[] = {
-    { "THE GRASS DIES OUT. STONE AND HUSH.", SPK_MAX },
-    { "NO TALL GRASS. SOMETHING WAITS ON THE PATH.", SPK_NONE },
-};
-static const TalkBeat TALK_GROVE_LEAVE[] = {
-    { "BACK UNDER THE TREES.", SPK_MAX },
-};
-static const TalkBeat TALK_CAMP_ENTER[] = {
-    { "TENTS, COLD FIRES. THE CAMP AT LAST.", SPK_NONE },
-    { "SOMEONE IS STILL HERE.", SPK_NONE },
-};
-static const TalkBeat TALK_CAMP_LEAVE[] = {
-    { "BACK TOWARD CALDER'S GROUND.", SPK_NONE },
-};
 
 /* Remaining data.TALK entries: the VELD/FOREST/GROVE NPCs, Mason,
-   Anne, and Bram's shop-open line. Ported verbatim except upper-cased,
-   same as every TALK_* array above. */
+   Anne, and Bram's shop-open line.
+   TALK_MASON_FIGHT is the game's real opening scene now -- the old
+   one-line ENTER flavor text this door warp used to show is gone (see
+   draw_map_banner), so this ambush conversation is the first thing
+   the player reads after leaving the house, and it carries the whole
+   premise: Max reveals where she's actually going and why, Mason
+   thinks it's suicide, and says so with his fists. */
 static const TalkBeat TALK_MASON_FIGHT[] = {
-    { "YOU WALKED OUT WITH THAT HOUND.", SPK_MASON },
-    { "HE'S MINE.", SPK_MAX },
-    { "I ALREADY CAUGHT A CRYMON. FIGHT ME.", SPK_MASON },
+    { "MAX. STOP RIGHT THERE.", SPK_MASON },
+    { "MASON.", SPK_MAX },
+    { "YOU WALKED OUT WITH YOUR FATHER'S HOUND AND A CRYSTAL IN YOUR FIST. WHERE ARE YOU GOING?", SPK_MASON },
+    { "SOUTH. PAST THE WEEPING ARMY'S CAMP, TO THE GROVE.", SPK_MAX },
+    { "THE GROVE IS A PRISON. NOBODY WALKS OUT OF THE GROVE.", SPK_MASON },
+    { "SHINIGAMI IS CHAINED THERE. LOCKED UP FOR NECROMANCY.", SPK_MAX },
+    { "I'M GOING TO FREE HIM. HE OWES ME POWER FOR IT.", SPK_MAX },
+    { "YOU'RE EIGHT. YOU CANNOT WIN THIS WAR, AND YOU CANNOT BARGAIN WITH A NECROMANCER.", SPK_MASON },
+    { "I'M NOT ASKING.", SPK_MAX },
+    { "THEN YOUR CRYMON FAINTS HERE, AND YOU GO BACK INSIDE WHERE IT'S SAFE.", SPK_MASON },
 };
 static const TalkBeat TALK_MASON_WIN[] = {
-    { "MASON SPITS IN THE DIRT. THE PATH IS YOURS. CALDER STILL WAITS SOUTH.", SPK_NONE },
-    { "I WON'T DIE FIRST.", SPK_MASON },
+    { "MASON SPITS IN THE DIRT. HIS CRYMON WON'T RISE.", SPK_NONE },
+    { "GO, THEN. BUT THE CAMP GUARDS THE ROAD SOUTH, AND THE GROVE GUARDS ITSELF.", SPK_MASON },
+    { "I DIDN'T ASK FOR YOUR BLESSING.", SPK_MAX },
+    { "YOU DIDN'T NEED IT. YOU TOOK IT ANYWAY.", SPK_MASON },
 };
 /* Mason's rematch, ambush dialogue -- see main()'s mason2_* state and
    the world-actors section comment for the full trigger chain. */
@@ -1346,7 +1384,7 @@ static const TalkBeat TALK_WREN_FIRST[] = {
     { "WEST IS IVO. EAST IS NELL. KEEP THAT HOUND FED.", SPK_WREN },
 };
 static const TalkBeat TALK_WREN_BEAT[] = {
-    { "YOU BEAT HIM. THE WAR STILL WANTS MORE OF US.", SPK_WREN },
+    { "YOU BEAT HIM. THE WEEPING ARMY STILL WANTS MORE OF US.", SPK_WREN },
     { "THEN IT CAN WAIT.", SPK_MAX },
 };
 static const TalkBeat TALK_WREN_CART[] = {
@@ -1425,54 +1463,80 @@ static const TalkBeat TALK_STUMP_GONE[] = {
 };
 static const TalkBeat TALK_CART[] = {
     { "THEY ALREADY KNEW MY NAME.", SPK_MAX },
-    { "A CAMP LETTER ON THE WRECK, SEND THE COTTAGE GIRL SOUTH. WE NEED BODIES.", SPK_NONE },
+    { "A WEEPING ARMY LETTER ON THE WRECK. SEND THE COTTAGE GIRL SOUTH. WE NEED BODIES.", SPK_NONE },
 };
 static const TalkBeat TALK_CALDER_AFTER[] = {
-    { "SOUTH IS THE CAMP. DON'T DIE STUPID.", SPK_CALDER },
+    { "SOUTH IS THE WEEPING ARMY'S CAMP. DON'T DIE STUPID.", SPK_CALDER },
     { "I DON'T PLAN TO.", SPK_MAX },
 };
 static const TalkBeat TALK_CALDER_FIGHT[] = {
-    { "THE CAMP TAKES STRAYS.", SPK_CALDER },
+    { "THE CAMP TAKES STRAYS. ONE MORE WON'T BE MISSED.", SPK_CALDER },
     { "I'M NOT STRAY.", SPK_MAX },
 };
-/* Shown once battle_finish_win() ends a Calder fight, replacing the
-   old instant cut to ENDING_WIN -- see MAP_CAMP's section comment.
+/* Shown once battle_finish_win() ends a Calder fight -- see MAP_CAMP's
+   section comment for why this no longer cuts to an ending screen.
    BAFTER_ITEM (like every other trainer win message) returns to the
    world once closed, no post_action needed here. */
 static const TalkBeat TALK_CALDER_WIN[] = {
     { "CALDER FALLS. THE PATH SOUTH IS CLEAR.", SPK_NONE },
     { "THE CAMP WAITS.", SPK_NONE },
 };
-/* The camp commander (mark 'I' on MAP_CAMP): first visit queues
-   POST_ENDING_WIN, which shows ENDING_WIN once this closes -- the
-   real payoff every "the camp" line in this file was pointing at. */
+/* The Weeping Army officer (mark 'I' on MAP_CAMP): a taunt and a
+   redirect south toward the Grove, not the game's ending anymore --
+   post_action is POST_NONE now, see its trigger site. */
 static const TalkBeat TALK_CAMP_COMMANDER[] = {
-    { "SO YOU'RE THE ONE WHO BEAT CALDER.", SPK_NONE },
-    { "CRYTOWN SENDS AN EIGHT YEAR OLD. FINE.", SPK_NONE },
-    { "TAKE THE ROAD BACK. THIS WAR ISN'T YOURS TO FINISH.", SPK_NONE },
+    { "SO YOU'RE THE ONE WHO DROPPED CALDER.", SPK_NONE },
+    { "CRYTOWN SENDS AN EIGHT YEAR OLD INTO OUR OWN CAMP. PATHETIC LITTLE RAT.", SPK_NONE },
+    { "GET BACK ON THE ROAD BEFORE WE FEED YOU TO THE GROVE OURSELVES.", SPK_NONE },
+    { "I'M ALREADY GOING THERE.", SPK_MAX },
 };
+/* Cathleen guards the door behind her (the GROVE's mid-map 'D' gate,
+   see tile_blocked) -- both TALK_CATHLEEN_AFTER (beaten) and
+   TALK_CATHLEEN_GONE (captured, via battle_pick_item's own separate
+   capture message) now say so directly, since either outcome hands
+   the key over (beat_cathleen/cath_caught, ORed together at
+   tile_blocked's call sites). */
 static const TalkBeat TALK_CATHLEEN_SPOT[] = {
-    { "YOU WALKED THE PATH. I AM THE PATH'S ANSWER.", SPK_CATHLEEN },
-    { "YOU'RE A CRYMON.", SPK_MAX },
-    { "I AM CATHLEEN. I FIGHT AS MYSELF.", SPK_CATHLEEN },
+    { "YOU WALKED THE PATH TO THE DOOR. I AM WHAT STANDS IN FRONT OF IT.", SPK_CATHLEEN },
+    { "YOU'RE A CRYMON. WHY GUARD A DOOR?", SPK_MAX },
+    { "I AM CATHLEEN. I GUARD SHINIGAMI'S DOOR, AND I CARRY ITS KEY.", SPK_CATHLEEN },
+    { "NEITHER LEAVES WITHOUT A FIGHT.", SPK_CATHLEEN },
 };
 static const TalkBeat TALK_CATHLEEN_AFTER[] = {
-    { "YOU STAND. COME AGAIN IF YOU MEAN TO KEEP ME.", SPK_CATHLEEN },
-    { "I MIGHT.", SPK_MAX },
+    { "YOU STAND. THE DOOR IS UNBARRED NOW. THE KEY IS YOURS EITHER WAY.", SPK_CATHLEEN },
+    { "THE DOOR IS ENOUGH FOR NOW.", SPK_MAX },
 };
 static const TalkBeat TALK_CATHLEEN_GONE[] = {
-    { "ONLY THE HOOD'S SHADOW. SHE'S WITH ME NOW.", SPK_MAX },
+    { "ONLY THE KEY'S COLD WEIGHT WHERE SHE STOOD. THE DOOR IS OPEN NOW.", SPK_MAX },
 };
+/* Shinigami refuses to help before the fight (he wants out of the
+   Grove, not a bargain) and only hands the scroll over once he's
+   actually lost -- see TALK_SHINIGAMI_WIN, shown by
+   battle_finish_win()'s TRAINER_SHINIGAMI branch instead of the old
+   instant cut to an ending screen. */
 static const TalkBeat TALK_SHINIGAMI_SPOT[] = {
-    { "THREE NAMES. THREE GRAVES. I KEEP THEM.", SPK_SHINIGAMI },
-    { "YOU'RE IN THE WAY.", SPK_MAX },
-    { "CRYMARE. COME.", SPK_SHINIGAMI },
+    { "THREE NAMES. THREE GRAVES. I KEEP THEM WHILE THIS CAGE KEEPS ME.", SPK_SHINIGAMI },
+    { "I CAN FREE YOU. I NEED YOUR POWER FOR IT.", SPK_MAX },
+    { "I DON'T BARGAIN. I RUN. STAND ASIDE OR DON'T.", SPK_SHINIGAMI },
+    { "CRYMARE WILL MOVE YOU EITHER WAY.", SPK_SHINIGAMI },
 };
+static const TalkBeat TALK_SHINIGAMI_WIN[] = {
+    { "SHINIGAMI KNEELS. THE CRYMARE WON'T RISE AGAIN.", SPK_NONE },
+    { "FINE. YOU HIT HARDER THAN A DOOR SHOULD.", SPK_SHINIGAMI },
+    { "GIVE ME THE POWER. THAT WAS THE DEAL.", SPK_MAX },
+    { "TAKE THE SCROLL, THEN. LEGENDARY REANIMATION.", SPK_SHINIGAMI },
+    { "IT WAKES WHAT'S ALREADY DEAD. HUMAN OR CRYMON. USE IT WELL, OR DON'T.", SPK_SHINIGAMI },
+    { "I WON'T BE HERE TO CARE.", SPK_SHINIGAMI },
+    { "SHINIGAMI TURNS TO FOG BEFORE SHE CAN ANSWER. THE GROVE IS QUIET WHERE HE STOOD.", SPK_NONE },
+};
+/* His sprite is gone from the map once beat_shin is set (collect_npcs'
+   guard on mark '9'), so this is just an echo at the empty spot, not
+   a re-fightable NPC. */
 static const TalkBeat TALK_SHINIGAMI_DONE[] = {
-    { "THE GRAVES ARE QUIET. GO.", SPK_SHINIGAMI },
+    { "THE GRASS WHERE HE STOOD DOESN'T REMEMBER HIM.", SPK_NONE },
 };
 static const TalkBeat TALK_SOLDIER_SPOT[] = {
-    { "A SOLDIER SEES YOU. YOU THERE! THIS WOOD IS CAMP GROUND.", SPK_NONE },
+    { "A WEEPING ARMY SCOUT SPOTS YOU. OUT OF THE WAY, RAT. THIS WOOD IS OURS.", SPK_NONE },
     { "I'M PASSING THROUGH.", SPK_MAX },
 };
 static const TalkBeat TALK_SOLDIER_DONE[] = {
@@ -1498,18 +1562,41 @@ static const TalkBeat TALK_ANNE_GIFT[] = {
     { "I WON'T.", SPK_MAX },
     { "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAX'S PALM. XTALS +5.", SPK_NONE },
 };
-/* data.ENDING_WIN / data.DEMO_END, shown by the new ending screen
-   (draw_ending() in main()) after beating Calder / Shinigami. */
-static const char *const ENDING_WIN[] = {
-    "CALDER SITS IN THE MUD AND LAUGHS ONCE, WITHOUT HUMOUR.",
-    "FINE. THE CAMP TAKES STRAYS. KEEP THAT HOUND CLOSE. THE WAR DOES NOT CARE THAT YOU ARE EIGHT.",
-    "SOUTH, DRUMS. MAX CHECKS THE CRYSTALS. THEY ARE FEWER THAN SHE THOUGHT.",
-    "CRYMON. THE ROAD CONTINUES. WALK. CATCH. SURVIVE.",
+/* Anne's second approach -- gated on beat_shin (main()'s anne_state==0
+   trigger), only after Max already has the scroll. The resurrection
+   choice itself is a real 2-option screen (draw_choice(), armed by
+   POST_ANNE2_CHOICE once this closes), not more dialogue -- these
+   beats are just the reveal that makes the choice mean something. */
+static const TalkBeat TALK_ANNE_RETURN[] = {
+    { "MAX. I HOPED I WOULDN'T HAVE TO FIND YOU AGAIN.", SPK_ANNE },
+    { "ANNE. WHAT HAPPENED?", SPK_MAX },
+    { "YOUR FATHER. WHILE YOU WERE IN THE GROVE. HIS BREATH JUST STOPPED.", SPK_ANNE },
+    { "NO. NO, HE WAS SLEEPING. HE WAS JUST SLEEPING.", SPK_MAX },
+    { "I'M SORRY, MAX. BUT YOU'RE HOLDING A SCROLL THAT WAKES THE DEAD.", SPK_ANNE },
 };
+/* The two resolutions draw_choice() picks between (father vs
+   Heavenfall) -- both are narrative-only right now, not a new
+   playable party member: see the final report for why (no source art
+   exists for either as a battle sprite, and this port never
+   fabricates new art). Both post_action to POST_ENDING_FINAL. */
+static const TalkBeat TALK_CHOICE_FATHER[] = {
+    { "MAX UNROLLS THE SCROLL OVER HER FATHER'S STILL CHEST.", SPK_NONE },
+    { "HIS EYES OPEN. HE DOESN'T UNDERSTAND YET. NEITHER DOES SHE, NOT REALLY.", SPK_NONE },
+    { "WHATEVER HAPPENS NOW, WE FACE IT TOGETHER.", SPK_MAX },
+};
+static const TalkBeat TALK_CHOICE_HEAVENFALL[] = {
+    { "MAX UNROLLS THE SCROLL OVER GROUND NO ONE HAS DUG IN A THOUSAND YEARS.", SPK_NONE },
+    { "THE SKY CRACKS. SOMETHING ANCIENT AND ENORMOUS OPENS ITS EYES.", SPK_NONE },
+    { "HEAVENFALL IS AWAKE. THE WEEPING ARMY DOESN'T KNOW YET WHAT'S COMING.", SPK_MAX },
+};
+/* data.DEMO_END, shown by the ending screen (draw_ending() in main())
+   once the resurrection choice resolves -- the single ending now,
+   whichever the player picked (see POST_ENDING_FINAL). */
 static const char *const DEMO_END[] = {
-    "SHINIGAMI KNEELS. THE MARES FADE BACK INTO FOG.",
-    "THE GROVE GOES QUIET. THE GRAVES KEEP THEIR NAMES.",
-    "THANK YOU FOR PLAYING THE DEMO OF CRYMON.",
+    "MAX STANDS AT THE EDGE OF THE GROVE, THE SCROLL EMPTY IN HER HANDS.",
+    "THE WAR ISN'T OVER. IT ISN'T EVEN CLOSE TO OVER.",
+    "BUT FOR THE FIRST TIME SINCE SHE LEFT HOME, SHE ISN'T ALONE IN IT.",
+    "THANK YOU FOR PLAYING THE CRYMON DEMO.",
 };
 
 #define TALK_LEN(arr) (int)(sizeof(arr) / sizeof((arr)[0]))
@@ -1568,12 +1655,47 @@ static void draw_hud_toast(const char *text) {
     draw_text_s(text, 26, 10, 0xFFFF, DIALOGUE_SCALE);
 }
 
+/* Map-name banner: replaces the old per-door TALK_*_ENTER/LEAVE
+   flavor lines (do_warp() sets this instead of seq_lines now) with a
+   plain text fade-in/hold/fade-out showing where the player just
+   arrived, independent of the dialogue system entirely -- it needs no
+   A press and never blocks movement. The fade is a straight color
+   lerp from black to the text's own color and back (there's no true
+   alpha layer in this RGB565 framebuffer), driven by a countdown that
+   ticks every frame regardless of what else is on screen. */
+#define MAP_BANNER_IN    16
+#define MAP_BANNER_HOLD  70
+#define MAP_BANNER_OUT   16
+#define MAP_BANNER_TOTAL (MAP_BANNER_IN + MAP_BANNER_HOLD + MAP_BANNER_OUT)
+
+static const char *const MAP_DISPLAY_NAME[5] = {
+    "HOME", "CRYTOWN", "THE FOREST", "THE GROVE", "WEEPING ARMY CAMP"
+};
+
+static void draw_map_banner(int map_id, int timer) {
+    int elapsed = MAP_BANNER_TOTAL - timer;
+    int level;
+    u16 color;
+
+    if(elapsed < MAP_BANNER_IN)
+        level = (elapsed * 16) / MAP_BANNER_IN;
+    else if(elapsed < MAP_BANNER_IN + MAP_BANNER_HOLD)
+        level = 16;
+    else
+        level = ((MAP_BANNER_TOTAL - elapsed) * 16) / MAP_BANNER_OUT;
+    if(level < 0) level = 0;
+    if(level > 16) level = 16;
+
+    color = rgb565((u8)((232 * level) / 16), (u8)((228 * level) / 16), (u8)((216 * level) / 16));
+    draw_text_center_s(MAP_DISPLAY_NAME[map_id], SCREEN_W / 2, 14, color, 2);
+}
+
 /* Small HUD in the screen's top-left corner (fixed there regardless
    of camera position), showing what interacting has granted so far
    -- there's no inventory/party HUD overlay in the reference, but
    there's also no way to see this port's bag/party menus without
    opening them, so this stays as a quick-glance confirmation. */
-static void draw_hud(int got_shelf, int looted_crate, int bag_bandage) {
+static void draw_hud(int got_shelf, int looted_crate, int bag_bandage, int has_scroll) {
     int y = 2;
 
     if(got_shelf) {
@@ -1588,7 +1710,10 @@ static void draw_hud(int got_shelf, int looted_crate, int bag_bandage) {
         draw_text_s(label, 4, y, 0xFFFF, DIALOGUE_SCALE);
         draw_glyph(4 + text_width_s(label, DIALOGUE_SCALE), y,
                    font_09[bag_bandage % 10], 0xFFFF, DIALOGUE_SCALE);
+        y += DIALOGUE_LINE_H;
     }
+    if(has_scroll)
+        draw_text_s("LEGENDARY REANIMATION", 4, y, 0xFFFF, DIALOGUE_SCALE);
 }
 
 /* ----------------------------------------------------------------------
@@ -1973,6 +2098,37 @@ static void draw_party_menu(const Monster *party, int party_n, int lead, int par
     else {
         draw_text_s("NO CRYMON YET", MENU_X + 8, y, rgb565(138, 134, 120), MENU_SCALE);
     }
+}
+
+/* The father-vs-Heavenfall resurrection choice, armed by
+   POST_ANNE2_CHOICE once TALK_ANNE_RETURN closes (main()'s
+   choice_mode). Same frame/menu-row visual language as every other
+   full-screen menu here, just with only 2 rows and no way to back out
+   -- this is the one decision in the whole game that isn't optional,
+   matching "present the player with a choice" rather than a plain
+   dialogue beat with no real branch. */
+static void draw_choice_row(const char *label, int idx, int cur, int y) {
+    u16 color = (idx == cur) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
+    draw_text_s(idx == cur ? ">" : " ", MENU_X + 8, y, color, MENU_SCALE);
+    draw_text_s(label, MENU_X + 16, y, color, MENU_SCALE);
+}
+
+static void draw_choice(int cur) {
+    int y = MENU_Y + 24;
+
+    draw_menu_frame("THE SCROLL", "A CHOOSE");
+    draw_wrapped("LEGENDARY REANIMATION CAN WAKE ONE OF THE DEAD.",
+                 MENU_X + 8, y, rgb565(197, 206, 198), MENU_SCALE,
+                 (MENU_W - 16) / CHAR_CELL(MENU_SCALE), 9);
+    y += 28;
+
+    draw_choice_row("RESURRECT FATHER", 0, cur, y); y += MENU_ROW_H;
+    draw_choice_row("RESURRECT HEAVENFALL", 1, cur, y); y += MENU_ROW_H * 2;
+
+    draw_wrapped(cur == 0 ? "HE COMES BACK AS HE WAS. HUMAN, AND HERS."
+                          : "AN ANCIENT CRYMON WAKES. VAST AND UNKNOWN.",
+                 MENU_X + 8, y, rgb565(138, 134, 120), MENU_SCALE,
+                 (MENU_W - 16) / CHAR_CELL(MENU_SCALE), 9);
 }
 
 /* ----------------------------------------------------------------------
@@ -2694,21 +2850,52 @@ static const u16 *const MONSTER_SPRITES[11][4] = {
 
 /* Idle-animated like the stationary world NPCs (drawBattle()'s own
    `Math.floor(b.t * 4) % 4 + 1`, shared by foe and player sprite) --
-   frame_count/15 matches the same 4fps cadence draw_npc_idle() uses. */
-static void draw_battle_sprites(const Battle *b, u32 frame_count) {
+   frame_count/15 matches the same 4fps cadence draw_npc_idle() uses.
+   enter_t/faint_t are frame_count timestamps (main()'s battle_*_t
+   locals): 0 means "no animation in progress" for that side, matching
+   frame_count never legitimately being 0 once the title screen has
+   run a single frame. enter plays once per fresh monster (a new
+   battle, or a bench monster swapping in after a faint); faint plays
+   once hp actually hits 0 and holds on its last (fully faded) frame
+   for as long as the 0-hp monster stays on screen -- both read from
+   the same blit_sprite_anim so a sprite that's both "just entered"
+   and immediately guarded (impossible, but if timers ever overlapped)
+   would still draw sanely rather than double-applying either effect
+   twice. */
+#define BATTLE_ANIM_ENTER_FRAMES 18
+#define BATTLE_ANIM_FAINT_FRAMES 24
+static void draw_battle_sprites(const Battle *b, u32 frame_count,
+                                 u32 foe_enter_t, u32 foe_faint_t,
+                                 u32 pl_enter_t, u32 pl_faint_t) {
     int f = (int)((frame_count / 15u) % 4u);
-    if(b->foe.shiny)
-        blit_sprite_shiny(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                           BFOE_SPRITE_X, BFOE_SPRITE_Y);
-    else
-        blit_sprite(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                    BFOE_SPRITE_X, BFOE_SPRITE_Y);
-    if(b->pl.shiny)
-        blit_sprite_shiny(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                           BPL_SPRITE_X, BPL_SPRITE_Y);
-    else
-        blit_sprite(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
-                    BPL_SPRITE_X, BPL_SPRITE_Y);
+    int foe_revealed = MONSTER_SPRITE_H, foe_fade = 16;
+    int pl_revealed = MONSTER_SPRITE_H, pl_fade = 16;
+
+    if(foe_faint_t && frame_count >= foe_faint_t) {
+        u32 el = frame_count - foe_faint_t;
+        foe_fade = (el >= BATTLE_ANIM_FAINT_FRAMES) ? 0
+                       : 16 - (int)(el * 16u / BATTLE_ANIM_FAINT_FRAMES);
+    }
+    else if(foe_enter_t && frame_count >= foe_enter_t) {
+        u32 el = frame_count - foe_enter_t;
+        foe_revealed = (el >= BATTLE_ANIM_ENTER_FRAMES) ? MONSTER_SPRITE_H
+                           : (int)(el * (u32)MONSTER_SPRITE_H / BATTLE_ANIM_ENTER_FRAMES);
+    }
+    if(pl_faint_t && frame_count >= pl_faint_t) {
+        u32 el = frame_count - pl_faint_t;
+        pl_fade = (el >= BATTLE_ANIM_FAINT_FRAMES) ? 0
+                      : 16 - (int)(el * 16u / BATTLE_ANIM_FAINT_FRAMES);
+    }
+    else if(pl_enter_t && frame_count >= pl_enter_t) {
+        u32 el = frame_count - pl_enter_t;
+        pl_revealed = (el >= BATTLE_ANIM_ENTER_FRAMES) ? MONSTER_SPRITE_H
+                          : (int)(el * (u32)MONSTER_SPRITE_H / BATTLE_ANIM_ENTER_FRAMES);
+    }
+
+    blit_sprite_anim(MONSTER_SPRITES[b->foe.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                      BFOE_SPRITE_X, BFOE_SPRITE_Y, b->foe.shiny, foe_revealed, foe_fade);
+    blit_sprite_anim(MONSTER_SPRITES[b->pl.species][f], MONSTER_SPRITE_W, MONSTER_SPRITE_H,
+                      BPL_SPRITE_X, BPL_SPRITE_Y, b->pl.shiny, pl_revealed, pl_fade);
 }
 
 /* One line each -- "*NAME LVxx hp/maxHp" -- sized to BSTATUS_BOX_W's
@@ -2915,10 +3102,11 @@ static void draw_battle_bg(void) {
     blit_sprite(battle_bg, BATTLE_BG_W, BATTLE_BG_H, 0, 0);
 }
 
-static void draw_battle(const Battle *b, const Bag *bag, u32 frame_count) {
+static void draw_battle(const Battle *b, const Bag *bag, u32 frame_count,
+                         u32 foe_enter_t, u32 foe_faint_t, u32 pl_enter_t, u32 pl_faint_t) {
     draw_battle_bg();
     draw_battle_status(b);
-    draw_battle_sprites(b, frame_count);
+    draw_battle_sprites(b, frame_count, foe_enter_t, foe_faint_t, pl_enter_t, pl_faint_t);
 
     switch(b->phase) {
         case 0:
@@ -3148,14 +3336,15 @@ static void draw_shop(const Bag *bag, int marks, int sell_tab, int cur) {
 }
 
 /* ----------------------------------------------------------------------
- * Ending screens, ported from render.lua's drawEnding()/drawDemoEnd():
- * data.ENDING_WIN after beating Calder, data.DEMO_END after beating
- * Shinigami. Both just step through their lines on A and return to
- * the title screen at the end.
+ * Ending screen, ported from render.lua's drawDemoEnd(): data.DEMO_END,
+ * reached via the Grove/Shinigami/Anne chain and the resurrection
+ * choice (draw_choice()) regardless of which the player picks. Steps
+ * through its lines on A and returns to the title screen at the end.
  * ---------------------------------------------------------------------- */
 static void draw_ending(const char *const *lines, int n, int i) {
     vram_clear();
     draw_text_center_s("CRYMON", SCREEN_W / 2, 24, 0xFFFF, 2);
+    draw_text_center_s("GAME OVER", SCREEN_W / 2, 48, rgb565(143, 74, 64), 1);
     if(i < n)
         draw_wrapped(lines[i], 12, 80, rgb565(197, 206, 198), DIALOGUE_SCALE,
                      (SCREEN_W - 24) / CHAR_CELL(DIALOGUE_SCALE), 9);
@@ -3192,7 +3381,8 @@ static char closest_mark(int px, int py) {
    south, up otherwise) -- matches doorLock's 20-frame cooldown below
    against instantly re-triggering the door tile on arrival. */
 static void do_warp(int *map_id, int *px, int *py, int *pdir,
-                     int to_map, char mark, int from_south) {
+                     int to_map, char mark, int from_south,
+                     int *banner_timer) {
     int col, row, sx, sy;
     *map_id = to_map;
     find_mark(to_map, mark, &col, &row);
@@ -3201,6 +3391,7 @@ static void do_warp(int *map_id, int *px, int *py, int *pdir,
     *px = sx;
     *py = from_south ? (sy + TILE + 8) : (sy - TILE);
     *pdir = from_south ? 0 : 1;
+    *banner_timer = MAP_BANNER_TOTAL;
 }
 
 void main(void) {
@@ -3245,6 +3436,22 @@ void main(void) {
     Battle battle;
     int enc_lock = 8, last_tx = -1, last_ty = -1;
 
+    /* draw_battle_sprites' enter/faint animation timestamps -- see its
+       own comment. Tracked here by comparing each side's species/hp
+       frame to frame rather than threading state through every single
+       mint_monster()/battle.pl = party[lead] call site: a species
+       change (a fresh battle, or a bench monster swapping in) arms
+       enter_t, hp dropping to 0 arms faint_t, and leaving battle
+       clears every timer so the next one starts clean. 0 means "no
+       timer armed" (frame_count is never 0 by the time a battle can
+       start). */
+    u32 battle_foe_enter_t = 0, battle_foe_faint_t = 0;
+    u32 battle_pl_enter_t = 0, battle_pl_faint_t = 0;
+    int battle_prev_foe_species = -1, battle_prev_pl_species = -1;
+    int battle_prev_foe_hp = -1, battle_prev_pl_hp = -1;
+    int battle_prev_after = -1;
+    int battle_was_active = 0;
+
     /* 0 = no menu, 1 = bag, 2 = party. Opened from the world with Y /
        START (state.lua's selectPressed()/startPressed() -- there's no
        Select button on a Dreamcast pad, so Y stands in for it), closed
@@ -3266,6 +3473,11 @@ void main(void) {
     char hud_flash[40] = { 0 };
     int hud_t = 0;
 #define HUD_NOTE_FRAMES 720
+
+    /* draw_map_banner()'s countdown -- armed by do_warp() on every map
+       transition, ticks down every frame regardless of menus/dialogue
+       so it always finishes fading out on its own. */
+    int map_banner_timer = 0;
 
     /* Screen fade (bed heal, a party wipe teleporting home): 0 idle,
        1 fading to black, 2 holding one black frame while fade_action
@@ -3304,9 +3516,10 @@ void main(void) {
 #define POST_SHOP        6
 #define POST_MASON_LEAVE 7
 #define POST_ANNE_LEAVE  8
-#define POST_ENDING_WIN  9
 #define POST_BED_HEAL    10
 #define POST_MASON2      11
+#define POST_ANNE2_CHOICE 12
+#define POST_ENDING_FINAL 13
 
     /* World NPC/pickup flags, matching state.lua's G.talkedWren etc.
        (see the world-NPC section comment above for what's ported vs
@@ -3315,6 +3528,10 @@ void main(void) {
     int talked_pike = 0, pike_helped = 0, nell_bonus = 0;
     int got_herb = 0, got_gem = 0, got_stump = 0, read_cart = 0;
     int beat_calder = 0, beat_mason = 0, beat_shin = 0, cath_caught = 0;
+    int beat_cathleen = 0; /* set on any win vs her, not just a capture -- see tile_blocked's GROVE gate */
+    int has_scroll = 0; /* Legendary Reanimation, granted once Shinigami's win dialogue closes */
+    int anne2_told = 0; /* gates Anne's second (father-died/choice) approach to firing once */
+    int choice_mode = 0, choice_cur = 0; /* father-vs-Heavenfall resurrection choice screen */
     int soldier_beaten[3] = { 0, 0, 0 };
 
     /* Mason/Anne real movement, matching state.lua's rival/anne
@@ -3360,7 +3577,7 @@ void main(void) {
 
     /* Shop (Bram) and ending screens. */
     int shop_open = 0, shop_sell_tab = 0, shop_cur = 0;
-    int ending_mode = 0; /* 0 none, 1 ENDING_WIN, 2 DEMO_END */
+    int ending_mode = 0; /* 0 none, 1 showing DEMO_END (the single ending) */
     int ending_i = 0;
 
     video_init();
@@ -3381,6 +3598,59 @@ void main(void) {
         wait_vblank();
         fb_flip();
         frame_count++;
+
+        if(map_banner_timer > 0) map_banner_timer--;
+
+        /* Battle enter/faint animation tracking -- see the locals'
+           comment. Runs before input so a faint detected by the hit
+           that just landed (still this same frame, phase already
+           moved to the "X FALLS" message) is caught the very next
+           frame's draw, not one frame late. */
+        if(in_battle) {
+            if(!battle_was_active) {
+                battle_prev_foe_species = -1;
+                battle_prev_pl_species = -1;
+                battle_prev_after = -1;
+            }
+            if(battle.foe.species != battle_prev_foe_species) {
+                battle_foe_enter_t = frame_count;
+                battle_foe_faint_t = 0;
+                battle_prev_foe_species = battle.foe.species;
+                battle_prev_foe_hp = battle.foe.hp;
+            }
+            else if(battle.foe.hp <= 0 && battle_prev_foe_hp > 0 && !battle_foe_faint_t) {
+                battle_foe_faint_t = frame_count;
+            }
+            /* A successful capture (BAFTER_WORLD, see battle_pick_item)
+               withdraws the foe from battle without necessarily
+               dropping its hp to 0 -- reuses the same fade-out as
+               fainting, which reads fine for "leaving the screen"
+               either way instead of needing a third visual language. */
+            else if(battle.after == BAFTER_WORLD && battle_prev_after != BAFTER_WORLD &&
+                    !battle_foe_faint_t) {
+                battle_foe_faint_t = frame_count;
+            }
+            battle_prev_foe_hp = battle.foe.hp;
+            battle_prev_after = battle.after;
+
+            if(battle.pl.species != battle_prev_pl_species) {
+                battle_pl_enter_t = frame_count;
+                battle_pl_faint_t = 0;
+                battle_prev_pl_species = battle.pl.species;
+                battle_prev_pl_hp = battle.pl.hp;
+            }
+            else if(battle.pl.hp <= 0 && battle_prev_pl_hp > 0 && !battle_pl_faint_t) {
+                battle_pl_faint_t = frame_count;
+            }
+            battle_prev_pl_hp = battle.pl.hp;
+        }
+        else if(battle_was_active) {
+            battle_foe_enter_t = battle_foe_faint_t = 0;
+            battle_pl_enter_t = battle_pl_faint_t = 0;
+            battle_prev_foe_species = battle_prev_pl_species = -1;
+            battle_prev_after = -1;
+        }
+        battle_was_active = in_battle;
 
         raw = maple_poll_buttons();
         start_now = pressed(raw, CONT_START);
@@ -3460,13 +3730,15 @@ void main(void) {
                 in_battle = 0;
                 enc_lock = 8; last_tx = -1; last_ty = -1;
                 menu_mode = 0; party_cur = 0; party_detail = 0; bag_cur = 0; heal_item = -1;
-                hud_flash[0] = 0; hud_t = 0;
+                hud_flash[0] = 0; hud_t = 0; map_banner_timer = 0;
                 seq_lines = 0; seq_len = 0; seq_beat = 0;
                 post_action = POST_NONE; post_soldier_id = 0;
                 talked_wren = talked_mae = talked_ivo = talked_nell = 0;
                 talked_pike = pike_helped = nell_bonus = 0;
                 got_herb = got_gem = got_stump = read_cart = 0;
                 beat_calder = beat_mason = beat_shin = cath_caught = 0;
+                beat_cathleen = 0; has_scroll = 0; anne2_told = 0;
+                choice_mode = 0; choice_cur = 0;
                 soldier_beaten[0] = soldier_beaten[1] = soldier_beaten[2] = 0;
                 mason_state = 0; mason_x = mason_y = 0.0f; mason_dir = 0; mason_anim = 0.0f;
                 mason_rematch = 0; mason2_map = -1; mason2_done = 0;
@@ -3623,12 +3895,13 @@ void main(void) {
                                 battle_finish_win(&battle, party, lead);
 
                                 if(battle.trainer_kind == TRAINER_CALDER) {
-                                    /* No more instant cut to ENDING_WIN
+                                    /* No ending cut here at all anymore
                                        -- see MAP_CAMP's section comment.
                                        Beating him just opens VELD's 'F'
-                                       door; the camp commander further
-                                       south is what actually shows the
-                                       ending now. */
+                                       door; the camp officer further
+                                       south is a taunt, not the game's
+                                       ending (that's the Grove/
+                                       Shinigami/Anne chain now). */
                                     beat_calder = 1;
                                     marks += 18;
                                     in_battle = 0;
@@ -3697,22 +3970,47 @@ void main(void) {
                                     post_action = POST_MASON_LEAVE;
                                 }
                                 else if(battle.trainer_kind == TRAINER_SHINIGAMI) {
+                                    /* No instant cut to an ending
+                                       screen anymore -- he hands over
+                                       the scroll and vanishes from the
+                                       map (see TALK_SHINIGAMI_WIN and
+                                       collect_npcs' beat_shin guard on
+                                       mark '9'), and the story keeps
+                                       going from there (Anne's second
+                                       approach, then the resurrection
+                                       choice) instead of ending here. */
                                     beat_shin = 1;
+                                    has_scroll = 1;
                                     marks += 14;
-                                    ending_mode = 2;
-                                    ending_i = 0;
+                                    battles++;
                                     in_battle = 0;
+                                    enc_lock = 3;
+                                    seq_lines = TALK_SHINIGAMI_WIN;
+                                    seq_len = TALK_LEN(TALK_SHINIGAMI_WIN);
+                                    seq_beat = 0;
+                                    post_action = POST_NONE;
                                 }
                                 else {
                                     int n;
                                     marks += 3;
                                     battles++;
                                     if(battle.foe.species == SP_CATHLEEN) {
+                                        beat_cathleen = 1;
                                         seq_lines = TALK_CATHLEEN_AFTER;
                                         seq_len = TALK_LEN(TALK_CATHLEEN_AFTER);
                                         seq_beat = 0;
                                         in_battle = 0;
                                         enc_lock = 3;
+                                        /* Without this, post_action is
+                                           still POST_CATHLEEN from
+                                           starting the fight -- closing
+                                           this dialogue would silently
+                                           re-trigger case POST_CATHLEEN
+                                           below and restart the battle
+                                           (its own !cath_caught guard
+                                           doesn't stop a beaten-not-
+                                           captured Cathleen). */
+                                        post_action = POST_NONE;
                                     }
                                     else {
                                         /* note(): a HUD toast, not a
@@ -3913,16 +4211,39 @@ void main(void) {
                 }
             }
         }
+        else if(choice_mode) {
+            /* draw_choice()'s input: up/down between the 2 rows, A
+               locks it in -- no B, this choice doesn't have a "never
+               mind" (matches "present the player with a choice", not
+               an optional detour). Resolution beat picked by
+               choice_cur, then POST_ENDING_FINAL takes it to the
+               single ending regardless of which was picked. */
+            if(up_now && !prev_up) choice_cur = 1 - choice_cur;
+            if(down_now && !prev_down) choice_cur = 1 - choice_cur;
+            if(a_now && !prev_a) {
+                choice_mode = 0;
+                if(choice_cur == 0) {
+                    seq_lines = TALK_CHOICE_FATHER;
+                    seq_len = TALK_LEN(TALK_CHOICE_FATHER);
+                }
+                else {
+                    seq_lines = TALK_CHOICE_HEAVENFALL;
+                    seq_len = TALK_LEN(TALK_CHOICE_HEAVENFALL);
+                }
+                seq_beat = 0;
+                post_action = POST_ENDING_FINAL;
+            }
+        }
         else if(ending_mode) {
-            /* drawEnding()/drawDemoEnd(): step through data.ENDING_WIN
-               or data.DEMO_END on A, return to the title screen after
-               the last line (state.lua returns to MODE.TITLE, which
-               resetRun()s on the next confirm/start -- ported above,
-               in the state == 0 branch's start_now handler). */
+            /* drawDemoEnd(): step through data.DEMO_END on A, return
+               to the title screen after the last line (state.lua
+               returns to MODE.TITLE, which resetRun()s on the next
+               confirm/start -- ported above, in the state == 0
+               branch's start_now handler). */
             if(a_now && !prev_a) {
                 ending_i++;
                 {
-                    int n = (ending_mode == 1) ? TALK_LEN(ENDING_WIN) : TALK_LEN(DEMO_END);
+                    int n = TALK_LEN(DEMO_END);
                     if(ending_i >= n) {
                         ending_mode = 0;
                         state = 0;
@@ -3962,7 +4283,8 @@ void main(void) {
                plus a fixed offset, exactly like spawnRival below,
                so she starts walking in from off to one side rather
                than appearing at a fixed VELD landmark. */
-            if(anne_state == 0 && !anne_gifted && !seq_lines && battles >= 1 && map_id == MAP_VELD) {
+            if(anne_state == 0 && !seq_lines && map_id == MAP_VELD &&
+               ((!anne_gifted && battles >= 1) || (anne_gifted && beat_shin && !anne2_told))) {
                 anne_state = 1;
                 anne_x = (float)px;
                 anne_y = (float)py + 45.0f; /* 72 * 0.625 */
@@ -4050,12 +4372,26 @@ void main(void) {
                 float dist = f_sqrt(dx * dx + dy * dy);
                 if(dist < ACTOR_REACH_DIST) {
                     anne_state = 2;
-                    anne_gifted = 1;
-                    bag.gem += 5;
-                    seq_lines = TALK_ANNE_GIFT;
-                    seq_len = TALK_LEN(TALK_ANNE_GIFT);
-                    seq_beat = 0;
-                    post_action = POST_ANNE_LEAVE;
+                    if(!anne_gifted) {
+                        anne_gifted = 1;
+                        bag.gem += 5;
+                        seq_lines = TALK_ANNE_GIFT;
+                        seq_len = TALK_LEN(TALK_ANNE_GIFT);
+                        seq_beat = 0;
+                        post_action = POST_ANNE_LEAVE;
+                    }
+                    else {
+                        /* Second approach, after Shinigami: the
+                           father-died reveal, then straight into the
+                           resurrection choice once this dialogue
+                           closes (POST_ANNE2_CHOICE) -- see
+                           TALK_ANNE_RETURN and draw_choice(). */
+                        anne2_told = 1;
+                        seq_lines = TALK_ANNE_RETURN;
+                        seq_len = TALK_LEN(TALK_ANNE_RETURN);
+                        seq_beat = 0;
+                        post_action = POST_ANNE2_CHOICE;
+                    }
                 }
                 else {
                     anne_x += dx / dist * ACTOR_SPD_APPROACH;
@@ -4159,13 +4495,13 @@ void main(void) {
                     /* hitActor(): a live NPC blocks movement like a
                        solid tile (see actor_blocks() above). */
                     if(dx != 0 && !tile_blocked(map_id, tile_at(map_id, (nx + (dx > 0 ? 6 : -6)) / TILE,
-                                                                 py / TILE), cath_caught, beat_calder) &&
+                                                                 py / TILE), cath_caught || beat_cathleen, beat_calder) &&
                        !actor_blocks(map_id, nx, py, mason_state, mason_x, mason_y,
                                      anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         px = nx;
                     }
                     if(dy != 0 && !tile_blocked(map_id, tile_at(map_id, px / TILE,
-                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught, beat_calder) &&
+                                                                 (ny + (dy > 0 ? 6 : -6)) / TILE), cath_caught || beat_cathleen, beat_calder) &&
                        !actor_blocks(map_id, px, ny, mason_state, mason_x, mason_y,
                                      anne_state, anne_x, anne_y, soldiers, soldier_beaten)) {
                         py = ny;
@@ -4203,18 +4539,17 @@ void main(void) {
                             seq_beat = 0;
                         }
                         else {
-                            do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'D', 1);
+                            do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'D', 1, &map_banner_timer);
                             door_lock = 20;
-                            seq_lines = TALK_DOOR_OUT;
-                            seq_len = TALK_LEN(TALK_DOOR_OUT);
-                            seq_beat = 0;
                             /* spawnRival()/footsteps: Mason starts
                                south of the player's new VELD position
                                and force-walks up to ambush them
-                               (mason_state 1 == "approach"). Guarded
-                               on !beat_mason so re-using this door
-                               after he's already been fought (and left)
-                               doesn't respawn him. */
+                               (mason_state 1 == "approach") -- their
+                               farewell conversation (TALK_MASON_FIGHT)
+                               happens once he reaches her, not here.
+                               Guarded on !beat_mason so re-using this
+                               door after he's already been fought (and
+                               left) doesn't respawn him. */
                             if(mason_state == 0 && !beat_mason) {
                                 mason_state = 1;
                                 mason_x = (float)px;
@@ -4225,56 +4560,35 @@ void main(void) {
                         }
                     }
                     else if(map_id == MAP_VELD && here == 'D') {
-                        do_warp(&map_id, &px, &py, &pdir, MAP_HOUSE, 'D', 0);
+                        do_warp(&map_id, &px, &py, &pdir, MAP_HOUSE, 'D', 0, &map_banner_timer);
                         door_lock = 20;
-                        seq_lines = TALK_COTTAGE;
-                        seq_len = TALK_LEN(TALK_COTTAGE);
-                        seq_beat = 0;
                     }
                     else if(map_id == MAP_VELD && here == 'Z') {
-                        do_warp(&map_id, &px, &py, &pdir, MAP_FOREST, 'Y', 1);
+                        do_warp(&map_id, &px, &py, &pdir, MAP_FOREST, 'Y', 1, &map_banner_timer);
                         door_lock = 20;
-                        seq_lines = TALK_FOREST_ENTER;
-                        seq_len = TALK_LEN(TALK_FOREST_ENTER);
-                        seq_beat = 0;
                     }
                     else if(map_id == MAP_FOREST && here == 'Y') {
-                        do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'Z', 0);
+                        do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'Z', 0, &map_banner_timer);
                         door_lock = 20;
-                        seq_lines = TALK_FOREST_LEAVE;
-                        seq_len = TALK_LEN(TALK_FOREST_LEAVE);
-                        seq_beat = 0;
                     }
                     else if(map_id == MAP_FOREST && here == 'O') {
-                        do_warp(&map_id, &px, &py, &pdir, MAP_GROVE, 'O', 1);
+                        do_warp(&map_id, &px, &py, &pdir, MAP_GROVE, 'O', 1, &map_banner_timer);
                         door_lock = 20;
-                        seq_lines = TALK_GROVE_ENTER;
-                        seq_len = TALK_LEN(TALK_GROVE_ENTER);
-                        seq_beat = 0;
                     }
                     else if(map_id == MAP_GROVE && here == 'O') {
-                        do_warp(&map_id, &px, &py, &pdir, MAP_FOREST, 'O', 0);
+                        do_warp(&map_id, &px, &py, &pdir, MAP_FOREST, 'O', 0, &map_banner_timer);
                         door_lock = 20;
-                        seq_lines = TALK_GROVE_LEAVE;
-                        seq_len = TALK_LEN(TALK_GROVE_LEAVE);
-                        seq_beat = 0;
                     }
                     else if(map_id == MAP_VELD && here == 'F') {
                         /* Gated on beat_calder by tile_blocked() above
                            -- this tile is only walkable, and so only
                            reachable, once he's out of the way. */
-                        do_warp(&map_id, &px, &py, &pdir, MAP_CAMP, 'D', 1);
+                        do_warp(&map_id, &px, &py, &pdir, MAP_CAMP, 'D', 1, &map_banner_timer);
                         door_lock = 20;
-                        seq_lines = TALK_CAMP_ENTER;
-                        seq_len = TALK_LEN(TALK_CAMP_ENTER);
-                        seq_beat = 0;
                     }
                     else if(map_id == MAP_CAMP && here == 'D') {
-                        do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'F', 0);
+                        do_warp(&map_id, &px, &py, &pdir, MAP_VELD, 'F', 0, &map_banner_timer);
                         door_lock = 20;
-                        seq_lines = TALK_CAMP_LEAVE;
-                        seq_len = TALK_LEN(TALK_CAMP_LEAVE);
-                        seq_beat = 0;
                     }
                 }
             }
@@ -4296,7 +4610,8 @@ void main(void) {
                            branch has no such check). */
                         if(party_n > 0 || post_action == POST_SHOP ||
                            post_action == POST_MASON_LEAVE || post_action == POST_ANNE_LEAVE ||
-                           post_action == POST_ENDING_WIN || post_action == POST_BED_HEAL) {
+                           post_action == POST_ANNE2_CHOICE || post_action == POST_ENDING_FINAL ||
+                           post_action == POST_BED_HEAL) {
                             switch(post_action) {
                                 case POST_CALDER:
                                     battle.foe = mint_monster(SP_RAZORBAT, 4);
@@ -4439,7 +4754,17 @@ void main(void) {
                                     anne_dir = 0;
                                     anne_anim = 0.0f;
                                     break;
-                                case POST_ENDING_WIN:
+                                case POST_ANNE2_CHOICE:
+                                    /* Same walk-off as POST_ANNE_LEAVE,
+                                       plus the resurrection choice
+                                       screen once her reveal closes. */
+                                    anne_state = 3;
+                                    anne_dir = 0;
+                                    anne_anim = 0.0f;
+                                    choice_mode = 1;
+                                    choice_cur = 0;
+                                    break;
+                                case POST_ENDING_FINAL:
                                     ending_mode = 1;
                                     ending_i = 0;
                                     break;
@@ -4742,13 +5067,15 @@ void main(void) {
                     }
                 }
                 else if(map_id == MAP_CAMP) {
-                    /* The camp commander (mark 'I'): the payoff for
-                       every "the camp" line elsewhere in this file --
-                       see MAP_CAMP's section comment. */
+                    /* The Weeping Army officer (mark 'I'): a taunt,
+                       not an ending -- the story's real ending is the
+                       Grove/Shinigami/Anne chain, so this no longer
+                       cuts to a title-screen "win" the moment Calder
+                       falls (see MAP_CAMP's section comment). */
                     if(near_mark(map_id, 'I', px, py, 676)) {
                         seq_lines = TALK_CAMP_COMMANDER;
                         seq_len = TALK_LEN(TALK_CAMP_COMMANDER);
-                        post_action = POST_ENDING_WIN;
+                        post_action = POST_NONE;
                         seq_beat = 0;
                     }
                 }
@@ -4779,9 +5106,7 @@ void main(void) {
             draw_press_start();
         }
         else if(ending_mode) {
-            draw_ending(ending_mode == 1 ? ENDING_WIN : DEMO_END,
-                        ending_mode == 1 ? TALK_LEN(ENDING_WIN) : TALK_LEN(DEMO_END),
-                        ending_i);
+            draw_ending(DEMO_END, TALK_LEN(DEMO_END), ending_i);
         }
         else {
             compute_camera(map_id, px, py, &cam_x, &cam_y);
@@ -4795,24 +5120,30 @@ void main(void) {
                 collect_npcs(ws_list, &ws_n, map_id, frame_count,
                              mason_state, mason_x, mason_y, mason_dir, mason_frame,
                              anne_state, anne_x, anne_y, anne_dir, anne_frame,
-                             cath_caught, soldiers, soldier_beaten);
+                             cath_caught, beat_shin, soldiers, soldier_beaten);
                 ws_push(ws_list, &ws_n, MAX_FRAMES[pdir][(anim_counter / 10) & 3],
                         MAX_SPRITE_W, MAX_SPRITE_H, px, py);
                 ws_sort_and_draw(ws_list, ws_n, cam_x, cam_y);
             }
-            draw_hud(got_shelf, looted_crate, bag.bandage);
+            draw_hud(got_shelf, looted_crate, bag.bandage, has_scroll);
             if(seq_lines)
                 draw_dialogue_box(&seq_lines[seq_beat]);
             else if(hud_t > 0)
                 draw_hud_toast(hud_flash);
+            if(map_banner_timer > 0)
+                draw_map_banner(map_id, map_banner_timer);
             if(menu_mode == 1)
                 draw_bag_menu(&bag, marks, bag_cur);
             else if(menu_mode == 2)
                 draw_party_menu(party, party_n, lead, party_cur, party_detail, heal_item);
             if(in_battle)
-                draw_battle(&battle, &bag, frame_count);
+                draw_battle(&battle, &bag, frame_count,
+                            battle_foe_enter_t, battle_foe_faint_t,
+                            battle_pl_enter_t, battle_pl_faint_t);
             if(shop_open)
                 draw_shop(&bag, marks, shop_sell_tab, shop_cur);
+            if(choice_mode)
+                draw_choice(choice_cur);
         }
 
         /* Post-process over whatever was just drawn, whatever it was
