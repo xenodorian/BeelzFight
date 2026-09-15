@@ -457,15 +457,18 @@ static void draw_glyph(int ox, int oy, const uint8_t bitmap[8], u16 color, int s
     }
 }
 
-/* Extra gap between characters, beyond the glyph's own 8px cell,
-   scaled the same as everything else -- a plain fixed-width 8px
-   advance read as visually cramped once the font went bold.
+/* Extra gap between characters, beyond the glyph's own 8px cell.
+   draw_glyph's black outline is a full 2px ring around each glyph, so
+   a gap under 2px still lets adjacent glyphs' outlines collide even
+   though the glyphs themselves don't -- the previous 1px gap (scale)
+   wasn't enough, still visibly overlapping; +2 flat pixels on top of
+   the scaled base gap clears the outline reach with room to spare.
    CHAR_CELL is the resulting total per-character advance; every
    char-count-based word-wrap width (DIALOGUE_MAX_CHARS, the battle
    message box, the ending screen) is computed from it rather than a
    bare /8, so wrapping still matches the font's real on-screen
    width instead of running text past the edge of its box. */
-#define LETTER_GAP(scale) (scale)
+#define LETTER_GAP(scale) ((scale) + 2)
 #define CHAR_CELL(scale)  (8 * (scale) + LETTER_GAP(scale))
 
 static void draw_text_s(const char *s, int x, int y, u16 color, int scale) {
@@ -1169,8 +1172,6 @@ static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
         ws_push_mark_idle(list, n, map_id, 'E', CALDER_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
         if(mason_state)
             ws_push_walker(list, n, MASON_FRAMES, mason_x, mason_y, mason_dir, mason_frame);
-        if(anne_state)
-            ws_push_walker(list, n, ANNE_FRAMES, anne_x, anne_y, anne_dir, anne_frame);
     }
     else if(map_id == MAP_FOREST) {
         int i;
@@ -1191,6 +1192,14 @@ static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
            (down-facing, standing) since he's a camp officer too. */
         ws_push_mark(list, n, map_id, 'I', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
     }
+
+    /* Anne isn't tied to one map like the stationary VELD NPCs --
+       her second approach now meets Max wherever she is right after
+       the Cathleen fight (the GROVE, not necessarily VELD), so this
+       is unconditional instead of living inside the MAP_VELD branch
+       above. */
+    if(anne_state)
+        ws_push_walker(list, n, ANNE_FRAMES, anne_x, anne_y, anne_dir, anne_frame);
 }
 
 /* Insertion sort by cy (small n, not worth anything fancier) then
@@ -1353,12 +1362,14 @@ static const TalkBeat TALK_DOOR_LOCKED[] = {
 static const TalkBeat TALK_MASON_FIGHT[] = {
     { "MAX. STOP RIGHT THERE.", SPK_MASON },
     { "MASON.", SPK_MAX },
-    { "YOU WALKED OUT WITH YOUR FATHER'S HOUND AND A CRYSTAL IN YOUR FIST. WHERE ARE YOU GOING?", SPK_MASON },
+    { "YOU WALKED OUT WITH YOUR FATHER'S HOUND AND A CRYSTAL IN YOUR FIST.", SPK_MASON },
+    { "WHERE ARE YOU GOING?", SPK_MASON },
     { "SOUTH. PAST THE WEEPING ARMY'S CAMP, TO THE GROVE.", SPK_MAX },
     { "THE GROVE IS A PRISON. NOBODY WALKS OUT OF THE GROVE.", SPK_MASON },
     { "SHINIGAMI IS CHAINED THERE. LOCKED UP FOR NECROMANCY.", SPK_MAX },
     { "I'M GOING TO FREE HIM. HE OWES ME POWER FOR IT.", SPK_MAX },
-    { "YOU'RE EIGHT. YOU CANNOT WIN THIS WAR, AND YOU CANNOT BARGAIN WITH A NECROMANCER.", SPK_MASON },
+    { "YOU'RE EIGHT. YOU CANNOT WIN THIS WAR.", SPK_MASON },
+    { "AND YOU CANNOT BARGAIN WITH A NECROMANCER.", SPK_MASON },
     { "I'M NOT ASKING.", SPK_MAX },
     { "THEN YOUR CRYMON FAINTS HERE, AND YOU GO BACK INSIDE WHERE IT'S SAFE.", SPK_MASON },
 };
@@ -1527,7 +1538,9 @@ static const TalkBeat TALK_SHINIGAMI_WIN[] = {
     { "TAKE THE SCROLL, THEN. LEGENDARY REANIMATION.", SPK_SHINIGAMI },
     { "IT WAKES WHAT'S ALREADY DEAD. HUMAN OR CRYMON. USE IT WELL, OR DON'T.", SPK_SHINIGAMI },
     { "I WON'T BE HERE TO CARE.", SPK_SHINIGAMI },
-    { "SHINIGAMI TURNS TO FOG BEFORE SHE CAN ANSWER. THE GROVE IS QUIET WHERE HE STOOD.", SPK_NONE },
+    { "SHINIGAMI TURNS TO FOG BEFORE SHE CAN ANSWER.", SPK_NONE },
+    { "THE GROVE IS QUIET WHERE HE STOOD.", SPK_NONE },
+    { "HER FATHER. THE SCROLL. THIS IS WHY SHE CAME.", SPK_NONE },
 };
 /* His sprite is gone from the map once beat_shin is set (collect_npcs'
    guard on mark '9'), so this is just an echo at the empty spot, not
@@ -1562,17 +1575,20 @@ static const TalkBeat TALK_ANNE_GIFT[] = {
     { "I WON'T.", SPK_MAX },
     { "ANNE PRESSES FIVE CAPTURE CRYSTALS INTO MAX'S PALM. XTALS +5.", SPK_NONE },
 };
-/* Anne's second approach -- gated on beat_shin (main()'s anne_state==0
-   trigger), only after Max already has the scroll. The resurrection
-   choice itself is a real 2-option screen (draw_choice(), armed by
-   POST_ANNE2_CHOICE once this closes), not more dialogue -- these
-   beats are just the reveal that makes the choice mean something. */
+/* Anne's second approach -- gated on (beat_cathleen || cath_caught)
+   (main()'s anne_state==0 trigger), meeting Max immediately wherever
+   the Cathleen fight left her (the GROVE) instead of waiting for a
+   trip back to VELD. Just the reveal here; the scroll doesn't exist
+   yet at this point in the story, so the actual resurrection choice
+   (draw_choice(), armed by POST_OPEN_CHOICE) doesn't open until
+   Shinigami hands it over afterward. */
 static const TalkBeat TALK_ANNE_RETURN[] = {
     { "MAX. I HOPED I WOULDN'T HAVE TO FIND YOU AGAIN.", SPK_ANNE },
     { "ANNE. WHAT HAPPENED?", SPK_MAX },
-    { "YOUR FATHER. WHILE YOU WERE IN THE GROVE. HIS BREATH JUST STOPPED.", SPK_ANNE },
+    { "YOUR FATHER. WHILE YOU WERE FIGHTING CATHLEEN. HIS BREATH JUST STOPPED.", SPK_ANNE },
     { "NO. NO, HE WAS SLEEPING. HE WAS JUST SLEEPING.", SPK_MAX },
-    { "I'M SORRY, MAX. BUT YOU'RE HOLDING A SCROLL THAT WAKES THE DEAD.", SPK_ANNE },
+    { "I'M SORRY, MAX. I DIDN'T WANT YOU TO HEAR IT FROM ANYONE ELSE.", SPK_ANNE },
+    { "SHINIGAMI IS A NECROMANCER. IF ANYONE CAN UNDO THIS, IT'S HIM.", SPK_MAX },
 };
 /* The two resolutions draw_choice() picks between (father vs
    Heavenfall) -- both are narrative-only right now, not a new
@@ -2101,12 +2117,14 @@ static void draw_party_menu(const Monster *party, int party_n, int lead, int par
 }
 
 /* The father-vs-Heavenfall resurrection choice, armed by
-   POST_ANNE2_CHOICE once TALK_ANNE_RETURN closes (main()'s
-   choice_mode). Same frame/menu-row visual language as every other
-   full-screen menu here, just with only 2 rows and no way to back out
-   -- this is the one decision in the whole game that isn't optional,
-   matching "present the player with a choice" rather than a plain
-   dialogue beat with no real branch. */
+   POST_OPEN_CHOICE once TALK_SHINIGAMI_WIN closes (main()'s
+   choice_mode) -- Anne's reveal (TALK_ANNE_RETURN) already happened
+   earlier, right after Cathleen, so by the time the scroll actually
+   exists this is just the payoff. Same frame/menu-row visual language
+   as every other full-screen menu here, just with only 2 rows and no
+   way to back out -- this is the one decision in the whole game that
+   isn't optional, matching "present the player with a choice" rather
+   than a plain dialogue beat with no real branch. */
 static void draw_choice_row(const char *label, int idx, int cur, int y) {
     u16 color = (idx == cur) ? rgb565(232, 228, 216) : rgb565(138, 134, 120);
     draw_text_s(idx == cur ? ">" : " ", MENU_X + 8, y, color, MENU_SCALE);
@@ -2117,7 +2135,7 @@ static void draw_choice(int cur) {
     int y = MENU_Y + 24;
 
     draw_menu_frame("THE SCROLL", "A CHOOSE");
-    draw_wrapped("LEGENDARY REANIMATION CAN WAKE ONE OF THE DEAD.",
+    draw_wrapped("THE SCROLL CAN WAKE ONE OF THE DEAD.",
                  MENU_X + 8, y, rgb565(197, 206, 198), MENU_SCALE,
                  (MENU_W - 16) / CHAR_CELL(MENU_SCALE), 9);
     y += 28;
@@ -3518,7 +3536,7 @@ void main(void) {
 #define POST_ANNE_LEAVE  8
 #define POST_BED_HEAL    10
 #define POST_MASON2      11
-#define POST_ANNE2_CHOICE 12
+#define POST_OPEN_CHOICE 12
 #define POST_ENDING_FINAL 13
 
     /* World NPC/pickup flags, matching state.lua's G.talkedWren etc.
@@ -3975,10 +3993,12 @@ void main(void) {
                                        the scroll and vanishes from the
                                        map (see TALK_SHINIGAMI_WIN and
                                        collect_npcs' beat_shin guard on
-                                       mark '9'), and the story keeps
-                                       going from there (Anne's second
-                                       approach, then the resurrection
-                                       choice) instead of ending here. */
+                                       mark '9'). Anne already told Max
+                                       about her father right after
+                                       Cathleen, so this dialogue closing
+                                       goes straight into the
+                                       resurrection choice (POST_OPEN_
+                                       CHOICE) instead of ending here. */
                                     beat_shin = 1;
                                     has_scroll = 1;
                                     marks += 14;
@@ -3988,7 +4008,7 @@ void main(void) {
                                     seq_lines = TALK_SHINIGAMI_WIN;
                                     seq_len = TALK_LEN(TALK_SHINIGAMI_WIN);
                                     seq_beat = 0;
-                                    post_action = POST_NONE;
+                                    post_action = POST_OPEN_CHOICE;
                                 }
                                 else {
                                     int n;
@@ -4282,9 +4302,16 @@ void main(void) {
                closely enough). Spawns her at the player's own spot
                plus a fixed offset, exactly like spawnRival below,
                so she starts walking in from off to one side rather
-               than appearing at a fixed VELD landmark. */
-            if(anne_state == 0 && !seq_lines && map_id == MAP_VELD &&
-               ((!anne_gifted && battles >= 1) || (anne_gifted && beat_shin && !anne2_told))) {
+               than appearing at a fixed VELD landmark.
+
+               Her second approach is no longer tied to VELD at all --
+               she meets Max immediately after the Cathleen fight,
+               wherever that leaves her (the GROVE), rather than
+               waiting for a trip back to town. Gated on
+               (beat_cathleen || cath_caught) instead of beat_shin. */
+            if(anne_state == 0 && !seq_lines &&
+               ((!anne_gifted && battles >= 1 && map_id == MAP_VELD) ||
+                (anne_gifted && (beat_cathleen || cath_caught) && !anne2_told))) {
                 anne_state = 1;
                 anne_x = (float)px;
                 anne_y = (float)py + 45.0f; /* 72 * 0.625 */
@@ -4381,16 +4408,19 @@ void main(void) {
                         post_action = POST_ANNE_LEAVE;
                     }
                     else {
-                        /* Second approach, after Shinigami: the
-                           father-died reveal, then straight into the
-                           resurrection choice once this dialogue
-                           closes (POST_ANNE2_CHOICE) -- see
-                           TALK_ANNE_RETURN and draw_choice(). */
+                        /* Second approach, right after the Cathleen
+                           fight (not gated on returning to VELD): the
+                           father-died reveal. She just walks off after
+                           this one, same as her first visit -- the
+                           resurrection choice itself doesn't open
+                           until Shinigami actually hands over the
+                           scroll (POST_OPEN_CHOICE, see
+                           TRAINER_SHINIGAMI's win branch). */
                         anne2_told = 1;
                         seq_lines = TALK_ANNE_RETURN;
                         seq_len = TALK_LEN(TALK_ANNE_RETURN);
                         seq_beat = 0;
-                        post_action = POST_ANNE2_CHOICE;
+                        post_action = POST_ANNE_LEAVE;
                     }
                 }
                 else {
@@ -4610,7 +4640,7 @@ void main(void) {
                            branch has no such check). */
                         if(party_n > 0 || post_action == POST_SHOP ||
                            post_action == POST_MASON_LEAVE || post_action == POST_ANNE_LEAVE ||
-                           post_action == POST_ANNE2_CHOICE || post_action == POST_ENDING_FINAL ||
+                           post_action == POST_OPEN_CHOICE || post_action == POST_ENDING_FINAL ||
                            post_action == POST_BED_HEAL) {
                             switch(post_action) {
                                 case POST_CALDER:
@@ -4754,13 +4784,13 @@ void main(void) {
                                     anne_dir = 0;
                                     anne_anim = 0.0f;
                                     break;
-                                case POST_ANNE2_CHOICE:
-                                    /* Same walk-off as POST_ANNE_LEAVE,
-                                       plus the resurrection choice
-                                       screen once her reveal closes. */
-                                    anne_state = 3;
-                                    anne_dir = 0;
-                                    anne_anim = 0.0f;
+                                case POST_OPEN_CHOICE:
+                                    /* Opens draw_choice() once
+                                       TALK_SHINIGAMI_WIN closes -- Anne
+                                       already delivered the reveal
+                                       right after Cathleen, so this is
+                                       just the scroll/choice payoff,
+                                       no walk-up needed. */
                                     choice_mode = 1;
                                     choice_cur = 0;
                                     break;
