@@ -2622,36 +2622,35 @@ static int try_encounter(int map_id, int px, int py, int party_n,
  * directly over the battle background/sprites now, just outlined.
  * ---------------------------------------------------------------------- */
 
-/* The foe's CryMon sits flush in the upper right; Max's CryMon sits
-   flush in the lower left; the message/menu box sits in the lower
-   right. The two status boxes are neither corner-tucked against their
-   own sprite nor stacked on each other -- both sit near the vertical
-   middle of the screen, clear of one another: the foe's a bit higher
-   and pushed as far right as it can go without risking the edge, Max's
-   a bit lower and pushed as far left as it can go, so they read as a
-   matched diagonal pair instead of a single column. BSTATUS_* is
-   shared by both -- a single row (name, level and HP all on one
-   line), sized for that line's worst case ("*NEEDLEROOT LV12 87/87",
-   the longest species name/highest level+HP this game's level-12 cap
-   and try_encounter()'s wild-level table ever produce).
+/* BCONTENT (the message/item/attack/guard menu box) is sized tight
+   against its own content now that the mid-combat item menu no longer
+   carries effect text (see draw_battle_item_menu) -- its widest row
+   is the attack menu's "LIGHTNING STRIKE", not an item line, and its
+   height is still just the item menu's worst case (PASS + 5 items).
+   Shrinking it pushes it further right and further down (it's still
+   anchored to the bottom-right corner), which is what actually frees
+   the room the two status boxes and MONSTER_SPRITE_W/H below now use.
 
-   Both boxes are far wider than the old 98px corner boxes -- too wide
-   to sit anywhere BCONTENT_Y..SCREEN_H (BCONTENT claims that whole
-   band from x=BCONTENT_X rightward) without overlapping the
-   message/menu box, so both are kept above BCONTENT_Y, staggered in Y
-   (BGAP clear of each other) so a wide box on the left and a wide box
-   on the right never need to share a row. MONSTER_SPRITE_W/H is sized
-   to leave room for the foe's sprite, then its box, then BGAP
-   clearance above BCONTENT_Y, while still reading as a clear size
-   bump over the original 56px sprite. Max's own sprite isn't part of
-   that stack -- its 64px width keeps it left of BCONTENT_X regardless
-   of how far down the screen it sits, so it stays flush in the true
-   lower-left corner, independent of where Max's box ended up. BGAP is
-   the fixed clearance kept between every pair of these elements. */
+   The foe's status box takes the top-right edge (as high and as far
+   right as it can sit without risking the edge) instead of tucking
+   under the foe's sprite; the foe's sprite goes directly below the
+   box instead, sized as large as it can get while still clearing
+   BCONTENT_Y. Max's status box sits lower, near the screen's vertical
+   middle and as far left as it can go -- it doesn't need to clear the
+   foe's sprite at all (their X ranges don't overlap: the sprite is
+   flush against the right edge, the box flush against the left), only
+   the foe's own box (BGAP above it) and BCONTENT_Y (BGAP below it).
+   That's what lets the sprite grow far past what stacking both boxes
+   in the foe's own column allowed. Max's sprite, still flush in the
+   true lower-left corner, isn't part of any of this -- its width
+   alone keeps it clear of BCONTENT regardless of height. BGAP is the
+   fixed clearance kept between every pair of these elements. */
 #define BGAP          4
 
-#define BFOE_SPRITE_X (SCREEN_W - 8 - MONSTER_SPRITE_W)
-#define BFOE_SPRITE_Y 4
+#define BCONTENT_W    180
+#define BCONTENT_H    112
+#define BCONTENT_X    (SCREEN_W - 4 - BCONTENT_W)
+#define BCONTENT_Y    (SCREEN_H - 4 - BCONTENT_H)
 
 #define BSTATUS_BOX_W 208
 #define BSTATUS_BOX_H 18
@@ -2659,12 +2658,10 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 #define BFOE_BOX_W    BSTATUS_BOX_W
 #define BFOE_BOX_H    BSTATUS_BOX_H
 #define BFOE_BOX_X    (SCREEN_W - 4 - BSTATUS_BOX_W)
-#define BFOE_BOX_Y    (BFOE_SPRITE_Y + MONSTER_SPRITE_H + BGAP)
+#define BFOE_BOX_Y    4
 
-#define BCONTENT_W    210
-#define BCONTENT_H    120
-#define BCONTENT_X    (SCREEN_W - 4 - BCONTENT_W)
-#define BCONTENT_Y    (SCREEN_H - 4 - BCONTENT_H)
+#define BFOE_SPRITE_X (SCREEN_W - 8 - MONSTER_SPRITE_W)
+#define BFOE_SPRITE_Y (BFOE_BOX_Y + BSTATUS_BOX_H + BGAP)
 
 #define BPL_SPRITE_X  8
 #define BPL_SPRITE_Y  (SCREEN_H - 4 - MONSTER_SPRITE_H)
@@ -2672,7 +2669,7 @@ static int try_encounter(int map_id, int px, int py, int party_n,
 #define BPL_BOX_W     BSTATUS_BOX_W
 #define BPL_BOX_H     BSTATUS_BOX_H
 #define BPL_BOX_X     4
-#define BPL_BOX_Y     (BFOE_BOX_Y + BSTATUS_BOX_H + BGAP)
+#define BPL_BOX_Y     (BCONTENT_Y - BGAP - BSTATUS_BOX_H)
 
 #define BROW_H        16
 
@@ -2791,7 +2788,7 @@ static int battle_item_menu_kind(const Bag *bag, int idx) {
    Crystal's label includes the live capture chance, matching
    fillItemMenu's wild-battle branch (the trainer branch, plain
    "Capture Crystal xN", is dead code here -- b->wild is always 1). */
-static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
+static int draw_battle_item_menu(const Bag *bag, int cur) {
     int y = BCONTENT_Y + 8;
     int i = 0;
     char buf[40];
@@ -2799,47 +2796,38 @@ static int draw_battle_item_menu(const Battle *b, const Bag *bag, int cur) {
 
     draw_battle_menu_row("PASS", i++, cur, y); y += MENU_ROW_H;
 
-    /* Just the name and count now -- the effect (how much it heals/
-       buffs/debuffs, or the live capture chance) only appears on the
-       row the cursor is actually sitting on, matching the bag menu's
-       own ITEM_EFFECT_DESC treatment, instead of being baked into
-       every row's title whether it's selected or not. */
+    /* Just the name and count -- unlike the bag menu (draw_bag_row's
+       ITEM_EFFECT_DESC), the mid-combat item menu never shows the
+       effect text at all, on any row: BCONTENT_W is sized tight
+       against the attack menu's own longest row ("LIGHTNING STRIKE")
+       now that it doesn't have to leave room for it. */
     if(bag->salve > 0) {
         n = s_cat(buf, 0, "SALVE X");
         n = s_cat_uint(buf, n, bag->salve);
-        if(i == cur) n = s_cat(buf, n, "  +22HP");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->bandage > 0) {
         n = s_cat(buf, 0, "WRAP X");
         n = s_cat_uint(buf, n, bag->bandage);
-        if(i == cur) n = s_cat(buf, n, "  +12HP");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->bitterroot > 0) {
         n = s_cat(buf, 0, "BITTERROOT X");
         n = s_cat_uint(buf, n, bag->bitterroot);
-        if(i == cur) n = s_cat(buf, n, "  STR+4");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->dust > 0) {
         n = s_cat(buf, 0, "DUST X");
         n = s_cat_uint(buf, n, bag->dust);
-        if(i == cur) n = s_cat(buf, n, "  -3/-2/-2");
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
     if(bag->gem > 0) {
         n = s_cat(buf, 0, "CRYSTAL X");
         n = s_cat_uint(buf, n, bag->gem);
-        if(i == cur) {
-            n = s_cat(buf, n, "  ");
-            n = s_cat_uint(buf, n, battle_capture_chance(b));
-            n = s_cat(buf, n, " PCT");
-        }
         buf[n] = 0;
         draw_battle_menu_row(buf, i++, cur, y); y += MENU_ROW_H;
     }
@@ -2938,7 +2926,7 @@ static void draw_battle(const Battle *b, const Bag *bag, u32 frame_count) {
                          rgb565(232, 228, 216), MENU_SCALE, BCONTENT_W / CHAR_CELL(MENU_SCALE) - 2, 9);
             break;
         case 1:
-            draw_battle_item_menu(b, bag, b->cur);
+            draw_battle_item_menu(bag, b->cur);
             break;
         case 2:
             draw_battle_atk_menu(b, b->cur);
