@@ -77,7 +77,12 @@ def make_placeholder(w, h, tag):
 
 
 def open_or_placeholder(root, relpath, w, h, tag, manifest, note=''):
+    # Prefer art shipped with this port, then the CryMon checkout, then
+    # the synthesized placeholder cache.
+    local = os.path.join(HERE, '..', 'art', 'sprites', relpath)
     real = os.path.join(root, relpath)
+    if os.path.exists(local):
+        return Image.open(local)
     if os.path.exists(real):
         return Image.open(real)
     cached = os.path.join(PLACEHOLDER_DIR, relpath)
@@ -121,15 +126,17 @@ NPCS = {
     'bram':    'npc/bram-%d.png',
     'calder':  'npc/calder-%d.png',
     'shinigami': 'shinigami/down-%d.png',
-    # PLACEHOLDER_ART: no source art in xenodorian/CryMon for these 4 --
-    # the merchant and 3 friendly NPCs added in this pass. Same 4-frame
-    # idle convention as every NPC above; open_or_placeholder() fills
-    # them in with a synthesized "missing texture" tile and records
-    # them in ART_NEEDED.md.
     'oren':    'npc/oren-%d.png',
     'tessa':   'npc/tessa-%d.png',
     'birch':   'npc/birch-%d.png',
     'sable':   'npc/sable-%d.png',
+    # Unique Weeping Army NPCs (were reusing the generic soldier sprite).
+    'cross':      'npc/cross-%d.png',
+    'commander':  'npc/commander-%d.png',
+    'conscript':  'npc/conscript-%d.png',
+    'enforcer':   'npc/enforcer-%d.png',
+    'sentry':     'npc/sentry-%d.png',
+    'father':     'npc/father-%d.png',
 }
 NPC_FRAMES = [1, 2, 3, 4]
 
@@ -158,13 +165,9 @@ CATHLEEN_WORLD_W, CATHLEEN_WORLD_H = 28, 28
 MONSTERS = [
     'quillpup', 'glimmoth', 'tortcask', 'razorbat', 'mossback',
     'briarfox', 'fenwisp', 'duskhorn', 'needleroot', 'cathleen', 'crymare',
-    # PLACEHOLDER_ART: the 8 new species added in this pass -- no
-    # source art exists for any of these in xenodorian/CryMon.
-    # open_or_placeholder() fills each in with a synthesized "missing
-    # texture" tile (all 4 battle frames identical) and records them
-    # in ART_NEEDED.md.
     'emberling', 'frostail', 'boulderam', 'stormwing',
     'sableclaw', 'thornhide', 'glasswisp', 'ashenmaw',
+    'heavenfall',
 ]
 MONSTER_FRAMES = [1, 2, 3, 4]
 MONSTER_W, MONSTER_H = 92, 92
@@ -183,7 +186,6 @@ BATTLE_BG_W, BATTLE_BG_H = 320, 240
 # MENU_ROW_H=16 text row.
 ITEM_ICONS = [
     'salve', 'bandage', 'bitterroot', 'dust', 'gem',
-    # PLACEHOLDER_ART: the 4 new items added in this pass.
     'sunbalm', 'warroot', 'smokebomb', 'greatcrystal',
 ]
 ITEM_ICON_W, ITEM_ICON_H = 14, 14
@@ -204,8 +206,9 @@ ITEM_ICON_W, ITEM_ICON_H = 14, 14
 PORTRAITS = [
     'max', 'anne', 'mason', 'wren', 'mae', 'ivo', 'nell', 'pike',
     'calder', 'bram', 'cathleen', 'shinigami',
-    # PLACEHOLDER_ART: portraits for the merchant + 3 friendly NPCs.
     'oren', 'tessa', 'birch', 'sable',
+    'cross', 'commander', 'conscript', 'enforcer', 'sentry',
+    'father', 'heavenfall',
 ]
 PORTRAIT_BOX_W, PORTRAIT_BOX_H = 312, 176
 

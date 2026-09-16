@@ -1223,12 +1223,16 @@ static const u16 *const PIKE_FRAMES[4]   = { npc_pike_1, npc_pike_2, npc_pike_3,
 static const u16 *const BRAM_FRAMES[4]   = { npc_bram_1, npc_bram_2, npc_bram_3, npc_bram_4 };
 static const u16 *const CALDER_FRAMES[4] = { npc_calder_1, npc_calder_2, npc_calder_3, npc_calder_4 };
 static const u16 *const SHINIGAMI_FRAMES[4] = { npc_shinigami_1, npc_shinigami_2, npc_shinigami_3, npc_shinigami_4 };
-/* PLACEHOLDER_ART below (Oren/Tessa/Birch/Sable) -- see NPCS in
-   tools/gen_sprites.py and ART_NEEDED.md. */
 static const u16 *const OREN_FRAMES[4]  = { npc_oren_1, npc_oren_2, npc_oren_3, npc_oren_4 };
 static const u16 *const TESSA_FRAMES[4] = { npc_tessa_1, npc_tessa_2, npc_tessa_3, npc_tessa_4 };
 static const u16 *const BIRCH_FRAMES[4] = { npc_birch_1, npc_birch_2, npc_birch_3, npc_birch_4 };
 static const u16 *const SABLE_FRAMES[4] = { npc_sable_1, npc_sable_2, npc_sable_3, npc_sable_4 };
+static const u16 *const CROSS_FRAMES[4]      = { npc_cross_1, npc_cross_2, npc_cross_3, npc_cross_4 };
+static const u16 *const COMMANDER_FRAMES[4]  = { npc_commander_1, npc_commander_2, npc_commander_3, npc_commander_4 };
+static const u16 *const CONSCRIPT_FRAMES[4]  = { npc_conscript_1, npc_conscript_2, npc_conscript_3, npc_conscript_4 };
+static const u16 *const ENFORCER_FRAMES[4]   = { npc_enforcer_1, npc_enforcer_2, npc_enforcer_3, npc_enforcer_4 };
+static const u16 *const SENTRY_FRAMES[4]     = { npc_sentry_1, npc_sentry_2, npc_sentry_3, npc_sentry_4 };
+static const u16 *const FATHER_FRAMES[4]     = { npc_father_1, npc_father_2, npc_father_3, npc_father_4 };
 
 static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
                           int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
@@ -1259,20 +1263,15 @@ static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
             ws_push_mark_idle(list, n, map_id, '9', SHINIGAMI_FRAMES, frame_count, 20, NPC_SPRITE_W, NPC_SPRITE_H);
         if(!cath_caught)
             ws_push_mark(list, n, map_id, '8', npc_cathleen, CATHLEEN_WORLD_W, CATHLEEN_WORLD_H);
-        /* Warden Cross, a Weeping Army soldier -- reuses the generic
-           standing-soldier sprite, same as the camp officer below. */
-        ws_push_mark(list, n, map_id, 'K', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'K', CROSS_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
     }
     else if(map_id == MAP_CAMP) {
-        /* No dedicated commander art -- reuses the soldier sprite
-           (down-facing, standing) since he's a camp officer too. Same
-           for the 2 rank-and-file soldiers added at 'K'/'A'. */
-        ws_push_mark(list, n, map_id, 'I', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
-        ws_push_mark(list, n, map_id, 'K', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
-        ws_push_mark(list, n, map_id, 'A', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'I', COMMANDER_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'K', CONSCRIPT_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'A', ENFORCER_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
     }
     else if(map_id == MAP_CLIFFS) {
-        ws_push_mark(list, n, map_id, 'V', npc_soldier_down_1, NPC_SPRITE_W, NPC_SPRITE_H);
+        ws_push_mark_idle(list, n, map_id, 'V', SENTRY_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
         ws_push_mark_idle(list, n, map_id, 'Y', TESSA_FRAMES, frame_count, 15, NPC_SPRITE_W, NPC_SPRITE_H);
         /* Treasure chest: reuses the existing crate prop art rather
            than needing new placeholder art -- close enough visually
@@ -1368,12 +1367,18 @@ typedef struct {
 #define SPK_BRAM      10
 #define SPK_CATHLEEN  11
 #define SPK_SHINIGAMI 12
-/* PLACEHOLDER_ART: no portrait art for these 4 (the merchant + 3
-   friendly NPCs) -- see tools/gen_sprites.py's PORTRAITS list. */
 #define SPK_OREN      13
 #define SPK_TESSA     14
 #define SPK_BIRCH     15
 #define SPK_SABLE     16
+#define SPK_CROSS     17
+#define SPK_COMMANDER 18
+#define SPK_CONSCRIPT 19
+#define SPK_ENFORCER  20
+#define SPK_SENTRY    21
+#define SPK_FATHER    22
+#define SPK_HEAVENFALL 23
+#define SPK_COUNT     24
 
 /* Each portrait keeps its source art's own aspect ratio (gen_sprites.py
    scales every one by the same factor on both axes to fill as much of
@@ -1386,7 +1391,7 @@ typedef struct {
     int w, h;
 } Portrait;
 
-static const Portrait SPEAKER_PORTRAIT[17] = {
+static const Portrait SPEAKER_PORTRAIT[SPK_COUNT] = {
     { 0, 0, 0 }, /* SPK_NONE */
     { port_max,       PORT_MAX_W,       PORT_MAX_H },
     { port_anne,      PORT_ANNE_W,      PORT_ANNE_H },
@@ -1400,12 +1405,17 @@ static const Portrait SPEAKER_PORTRAIT[17] = {
     { port_bram,      PORT_BRAM_W,      PORT_BRAM_H },
     { port_cathleen,  PORT_CATHLEEN_W,  PORT_CATHLEEN_H },
     { port_shinigami, PORT_SHINIGAMI_W, PORT_SHINIGAMI_H },
-    /* PLACEHOLDER_ART below (SPK_OREN..SPK_SABLE) -- see the #define
-       block above. */
     { port_oren,      PORT_OREN_W,      PORT_OREN_H },
     { port_tessa,     PORT_TESSA_W,     PORT_TESSA_H },
     { port_birch,     PORT_BIRCH_W,     PORT_BIRCH_H },
     { port_sable,     PORT_SABLE_W,     PORT_SABLE_H },
+    { port_cross,     PORT_CROSS_W,     PORT_CROSS_H },
+    { port_commander, PORT_COMMANDER_W, PORT_COMMANDER_H },
+    { port_conscript, PORT_CONSCRIPT_W, PORT_CONSCRIPT_H },
+    { port_enforcer,  PORT_ENFORCER_W,  PORT_ENFORCER_H },
+    { port_sentry,    PORT_SENTRY_W,    PORT_SENTRY_H },
+    { port_father,    PORT_FATHER_W,    PORT_FATHER_H },
+    { port_heavenfall,PORT_HEAVENFALL_W,PORT_HEAVENFALL_H },
 };
 
 /* The game's very first dialogue -- carries the CryMon = Crystal
@@ -1418,11 +1428,11 @@ static const TalkBeat TALK_FATHER[] = {
     { "YOU'RE TOO SICK TO FIGHT THEM. I KNOW THAT.", SPK_MAX },
     { "SO I'M TAKING YOUR CRYMON. YOUR CRYSTAL MONSTER.", SPK_MAX },
     { "IT SLEEPS INSIDE THE CRYSTAL UNTIL SOMEONE CRACKS IT OPEN.", SPK_MAX },
-    { "FATHER DOES NOT WAKE. THE CAPTURE CRYSTAL IS STILL ON THE SHELF.", SPK_NONE },
+    { "FATHER DOES NOT WAKE. THE CAPTURE CRYSTAL IS STILL ON THE SHELF.", SPK_FATHER },
 };
 static const TalkBeat TALK_FATHER_AFTER[] = {
     { "I ALREADY TOOK QUILLPUP. SLEEP. I'LL DO THE FIGHTING.", SPK_MAX },
-    { "HIS BREATH IS THIN. HE DOES NOT ANSWER.", SPK_NONE },
+    { "HIS BREATH IS THIN. HE DOES NOT ANSWER.", SPK_FATHER },
 };
 static const TalkBeat TALK_BED[] = {
     { "JUST UNTIL THEY BREATHE AGAIN.", SPK_MAX },
@@ -1600,9 +1610,9 @@ static const TalkBeat TALK_CALDER_WIN[] = {
    redirect south toward the Grove, not the game's ending anymore --
    post_action is POST_NONE now, see its trigger site. */
 static const TalkBeat TALK_CAMP_COMMANDER[] = {
-    { "SO YOU'RE THE ONE WHO DROPPED CALDER.", SPK_NONE },
-    { "CRYTOWN SENDS AN EIGHT YEAR OLD INTO OUR OWN CAMP. PATHETIC LITTLE RAT.", SPK_NONE },
-    { "GET BACK ON THE ROAD BEFORE WE FEED YOU TO THE GROVE OURSELVES.", SPK_NONE },
+    { "SO YOU'RE THE ONE WHO DROPPED CALDER.", SPK_COMMANDER },
+    { "CRYTOWN SENDS AN EIGHT YEAR OLD INTO OUR OWN CAMP. PATHETIC LITTLE RAT.", SPK_COMMANDER },
+    { "GET BACK ON THE ROAD BEFORE WE FEED YOU TO THE GROVE OURSELVES.", SPK_COMMANDER },
     { "I'M ALREADY GOING THERE.", SPK_MAX },
 };
 /* Cathleen guards the door behind her (the GROVE's mid-map 'D' gate,
@@ -1684,38 +1694,38 @@ static const TalkBeat TALK_BRAM_OPEN[] = {
  * and Mason's rematch already use, at increasing levels.
  * ---------------------------------------------------------------------- */
 static const TalkBeat TALK_WSOLDIER_CLIFFS_SPOT[] = {
-    { "A WEEPING ARMY SENTRY BLOCKS THE ROCKS.", SPK_NONE },
-    { "NOTHING UP HERE BUT WIND AND A DEAD MAN'S CRYMON.", SPK_NONE },
-    { "WE BURN THE FIELDS SO CRYTOWN STARVES BEFORE IT FIGHTS BACK.", SPK_NONE },
+    { "A WEEPING ARMY SENTRY BLOCKS THE ROCKS.", SPK_SENTRY },
+    { "NOTHING UP HERE BUT WIND AND A DEAD MAN'S CRYMON.", SPK_SENTRY },
+    { "WE BURN THE FIELDS SO CRYTOWN STARVES BEFORE IT FIGHTS BACK.", SPK_SENTRY },
     { "YOU'RE MONSTERS.", SPK_MAX },
-    { "WE'RE WINNING. THAT'S ALL WE ARE.", SPK_NONE },
+    { "WE'RE WINNING. THAT'S ALL WE ARE.", SPK_SENTRY },
 };
 static const TalkBeat TALK_WSOLDIER_CLIFFS_WIN[] = {
     { "THE SENTRY GOES DOWN HARD. THE CLIFFS ARE QUIET.", SPK_NONE },
 };
 static const TalkBeat TALK_WSOLDIER_CAMP1_SPOT[] = {
-    { "DON'T. PLEASE. THEY'LL WHIP ME IF I LET YOU PAST.", SPK_NONE },
+    { "DON'T. PLEASE. THEY'LL WHIP ME IF I LET YOU PAST.", SPK_CONSCRIPT },
     { "THEY MADE YOU DO THIS?", SPK_MAX },
-    { "THEY TOOK MY VILLAGE FIRST. THEN THEY TOOK ME.", SPK_NONE },
+    { "THEY TOOK MY VILLAGE FIRST. THEN THEY TOOK ME.", SPK_CONSCRIPT },
     { "I'M SORRY. I STILL HAVE TO FIGHT YOU.", SPK_MAX },
 };
 static const TalkBeat TALK_WSOLDIER_CAMP1_WIN[] = {
     { "THE CONSCRIPT SLUMPS, ALMOST RELIEVED TO LOSE.", SPK_NONE },
 };
 static const TalkBeat TALK_WSOLDIER_CAMP2_SPOT[] = {
-    { "ANOTHER RAT FROM CRYTOWN. GOOD. I WAS BORED.", SPK_NONE },
+    { "ANOTHER RAT FROM CRYTOWN. GOOD. I WAS BORED.", SPK_ENFORCER },
     { "I DON'T WANT TO FIGHT YOU.", SPK_MAX },
-    { "NOBODY EVER DOES. THAT'S WHY IT'S FUN.", SPK_NONE },
+    { "NOBODY EVER DOES. THAT'S WHY IT'S FUN.", SPK_ENFORCER },
 };
 static const TalkBeat TALK_WSOLDIER_CAMP2_WIN[] = {
     { "THE ENFORCER SPITS TEETH AND A CURSE. HE DOESN'T GET UP.", SPK_NONE },
 };
 static const TalkBeat TALK_WSOLDIER_GROVE_SPOT[] = {
-    { "WARDEN CROSS. THE WEEPING ARMY POSTED ME HERE FOR A REASON.", SPK_NONE },
+    { "WARDEN CROSS. THE WEEPING ARMY POSTED ME HERE FOR A REASON.", SPK_CROSS },
     { "TO GUARD A PRISONER?", SPK_MAX },
-    { "TO GUARD A WEAPON. THE GENERALS WANTED HIS NECROMANCY.", SPK_NONE },
-    { "FOR THE FRONT LINE.", SPK_NONE },
-    { "AN ARMY OF THE DEAD, IF HE'D EVER COOPERATED.", SPK_NONE },
+    { "TO GUARD A WEAPON. THE GENERALS WANTED HIS NECROMANCY.", SPK_CROSS },
+    { "FOR THE FRONT LINE.", SPK_CROSS },
+    { "AN ARMY OF THE DEAD, IF HE'D EVER COOPERATED.", SPK_CROSS },
     { "HE DIDN'T. NOW HE NEVER WILL.", SPK_MAX },
 };
 static const TalkBeat TALK_WSOLDIER_GROVE_WIN[] = {
@@ -1795,12 +1805,12 @@ static const TalkBeat TALK_ANNE_RETURN[] = {
    fabricates new art). Both post_action to POST_ENDING_FINAL. */
 static const TalkBeat TALK_CHOICE_FATHER[] = {
     { "MAX UNROLLS THE SCROLL OVER HER FATHER'S STILL CHEST.", SPK_NONE },
-    { "HIS EYES OPEN. HE DOESN'T UNDERSTAND YET. NEITHER DOES SHE, NOT REALLY.", SPK_NONE },
+    { "HIS EYES OPEN. HE DOESN'T UNDERSTAND YET. NEITHER DOES SHE, NOT REALLY.", SPK_FATHER },
     { "WHATEVER HAPPENS NOW, WE FACE IT TOGETHER.", SPK_MAX },
 };
 static const TalkBeat TALK_CHOICE_HEAVENFALL[] = {
     { "MAX UNROLLS THE SCROLL OVER GROUND NO ONE HAS DUG IN A THOUSAND YEARS.", SPK_NONE },
-    { "THE SKY CRACKS. SOMETHING ANCIENT AND ENORMOUS OPENS ITS EYES.", SPK_NONE },
+    { "THE SKY CRACKS. SOMETHING ANCIENT AND ENORMOUS OPENS ITS EYES.", SPK_HEAVENFALL },
     { "HEAVENFALL IS AWAKE. THE WEEPING ARMY DOESN'T KNOW YET WHAT'S COMING.", SPK_MAX },
 };
 /* data.DEMO_END, shown by the ending screen (draw_ending() in main())
@@ -1959,9 +1969,6 @@ typedef struct {
 #define SP_NEEDLEROOT 8
 #define SP_CATHLEEN   9
 #define SP_CRYMARE    10
-/* PLACEHOLDER_ART: the 8 species below (SP_EMBERLING..SP_ASHENMAW)
-   have no real battle sprite yet -- see tools/gen_sprites.py's
-   MONSTERS list and ART_NEEDED.md. */
 #define SP_EMBERLING  11
 #define SP_FROSTAIL   12
 #define SP_BOULDERAM  13
@@ -1970,8 +1977,9 @@ typedef struct {
 #define SP_THORNHIDE  16
 #define SP_GLASSWISP  17
 #define SP_ASHENMAW   18
+#define SP_HEAVENFALL 19
 
-static const Species SPECIES[19] = {
+static const Species SPECIES[20] = {
     /* name          basic       special         maxHp str agl spc spp  spells_n  spells (0=firebolt,1=icebeam,2=lightning,3=manasurge) */
     { "QUILLPUP",   "NIP",       "QUILLBURST",   34, 15, 10, 7,  3, 0, {0,0,0,0} },
     { "GLIMMOTH",   "DUSTWING",  "LAMPFLARE",    26, 7,  13, 16, 3, 0, {0,0,0,0} },
@@ -1984,8 +1992,6 @@ static const Species SPECIES[19] = {
     { "NEEDLEROOT", "PRICK",     "SAPDRAIN",     32, 12, 7,  14, 3, 0, {0,0,0,0} },
     { "CATHLEEN",   "FIRE BOLT", "MANA SURGE",   38, 11, 13, 19, 4, 4, {0,1,2,3} },
     { "CRYMARE",    "WAIL",      "NIGHTBRIDLE",  30, 9,  14, 18, 3, 0, {0,0,0,0} },
-    /* PLACEHOLDER_ART below (SP_EMBERLING..SP_ASHENMAW) -- see the
-       #define block above. */
     { "EMBERLING",  "SPARK",     "EMBERBLAZE",   28, 14, 15, 12, 3, 0, {0,0,0,0} },
     { "FROSTAIL",   "CHILL",     "FROSTFANG",    32, 12, 11, 15, 3, 0, {0,0,0,0} },
     { "BOULDERAM",  "RAM",       "STONESLAM",    46, 17, 4,  6,  3, 0, {0,0,0,0} },
@@ -1994,6 +2000,7 @@ static const Species SPECIES[19] = {
     { "THORNHIDE",  "BARB",      "THORNWALL",    40, 11, 6,  10, 3, 0, {0,0,0,0} },
     { "GLASSWISP",  "CHIME",     "PRISMFLARE",   22, 6,  14, 18, 3, 0, {0,0,0,0} },
     { "ASHENMAW",   "BITE",      "ASHENROAR",    34, 18, 12, 11, 3, 0, {0,0,0,0} },
+    { "HEAVENFALL", "METEOR",    "STARFALL",     58, 20, 10, 22, 4, 0, {0,0,0,0} },
 };
 
 typedef struct {
@@ -2161,9 +2168,6 @@ static void draw_menu_frame(const char *title, const char *footer) {
    bag, shop, and battle item-menu rows below, all of which previously
    showed items as bare text. icon may be null (the item-menu's "PASS"
    row has no matching icon). */
-/* PLACEHOLDER_ART: icon_sunbalm/warroot/smokebomb/greatcrystal have no
-   real source art -- see tools/gen_sprites.py's ITEM_ICONS list and
-   ART_NEEDED.md. */
 static const u16 *const ITEM_ICONS[9] = {
     icon_salve, icon_bandage, icon_bitterroot, icon_dust, icon_gem,
     icon_sunbalm, icon_warroot, icon_smokebomb, icon_greatcrystal
@@ -3162,7 +3166,7 @@ static int try_encounter(int map_id, int px, int py, int party_n,
    "Max's CryMon" (the player's own active monster; Max herself
    already has her own walk sprite on the world map, so this is what
    "the player's battle sprite" actually means in this game). */
-static const u16 *const MONSTER_SPRITES[19][4] = {
+static const u16 *const MONSTER_SPRITES[20][4] = {
     { monster_quillpup_1, monster_quillpup_2, monster_quillpup_3, monster_quillpup_4 },
     { monster_glimmoth_1, monster_glimmoth_2, monster_glimmoth_3, monster_glimmoth_4 },
     { monster_tortcask_1, monster_tortcask_2, monster_tortcask_3, monster_tortcask_4 },
@@ -3174,7 +3178,6 @@ static const u16 *const MONSTER_SPRITES[19][4] = {
     { monster_needleroot_1, monster_needleroot_2, monster_needleroot_3, monster_needleroot_4 },
     { monster_cathleen_1, monster_cathleen_2, monster_cathleen_3, monster_cathleen_4 },
     { monster_crymare_1, monster_crymare_2, monster_crymare_3, monster_crymare_4 },
-    /* PLACEHOLDER_ART below (SP_EMBERLING..SP_ASHENMAW) -- see SPECIES. */
     { monster_emberling_1, monster_emberling_2, monster_emberling_3, monster_emberling_4 },
     { monster_frostail_1, monster_frostail_2, monster_frostail_3, monster_frostail_4 },
     { monster_boulderam_1, monster_boulderam_2, monster_boulderam_3, monster_boulderam_4 },
@@ -3183,6 +3186,7 @@ static const u16 *const MONSTER_SPRITES[19][4] = {
     { monster_thornhide_1, monster_thornhide_2, monster_thornhide_3, monster_thornhide_4 },
     { monster_glasswisp_1, monster_glasswisp_2, monster_glasswisp_3, monster_glasswisp_4 },
     { monster_ashenmaw_1, monster_ashenmaw_2, monster_ashenmaw_3, monster_ashenmaw_4 },
+    { monster_heavenfall_1, monster_heavenfall_2, monster_heavenfall_3, monster_heavenfall_4 },
 };
 
 /* Idle-animated like the stationary world NPCs (drawBattle()'s own
