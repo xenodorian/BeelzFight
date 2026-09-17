@@ -268,5 +268,290 @@
       "title": "Warden sends CryMare",
       "name": "Warden Cross"
     }
-  }
+  },
+  "npcs": [
+    {
+      "map": "house",
+      "mark": "P",
+      "id": "spawn",
+      "role": "playerStart"
+    },
+    {
+      "map": "house",
+      "mark": "B",
+      "id": "father",
+      "role": "talk",
+      "talk": "father",
+      "talkDone": "fatherAfter"
+    },
+    {
+      "map": "house",
+      "mark": "U",
+      "id": "bed",
+      "role": "heal",
+      "talk": "bed"
+    },
+    {
+      "map": "house",
+      "mark": "S",
+      "id": "shelf",
+      "role": "starter",
+      "talk": "shelf",
+      "talkDone": "shelfEmpty",
+      "grantMonster": [
+        "quillpup",
+        3
+      ]
+    },
+    {
+      "map": "house",
+      "mark": "C",
+      "id": "crate",
+      "role": "loot",
+      "talk": "crate",
+      "talkDone": "crateEmpty",
+      "grantItem": [
+        "bandage",
+        1
+      ]
+    },
+    {
+      "map": "veld",
+      "mark": "D",
+      "id": "houseDoor",
+      "role": "door"
+    },
+    {
+      "map": "veld",
+      "mark": "K",
+      "id": "wren",
+      "role": "talk",
+      "sprite": "npc/wren"
+    },
+    {
+      "map": "veld",
+      "mark": "I",
+      "id": "mae",
+      "role": "talk",
+      "sprite": "npc/mae"
+    },
+    {
+      "map": "veld",
+      "mark": "V",
+      "id": "ivo",
+      "role": "talk",
+      "sprite": "npc/ivo"
+    },
+    {
+      "map": "veld",
+      "mark": "A",
+      "id": "nell",
+      "role": "talk",
+      "sprite": "npc/nell"
+    },
+    {
+      "map": "veld",
+      "mark": "Q",
+      "id": "pike",
+      "role": "talk",
+      "sprite": "npc/pike"
+    },
+    {
+      "map": "veld",
+      "mark": "J",
+      "id": "bram",
+      "role": "shop",
+      "sprite": "npc/bram",
+      "talk": "bramOpen"
+    },
+    {
+      "map": "veld",
+      "mark": "E",
+      "id": "calder",
+      "role": "trainer",
+      "sprite": "npc/calder",
+      "talk": "calderFight",
+      "talkDone": "calderAfter"
+    },
+    {
+      "map": "veld",
+      "mark": "M",
+      "id": "herb",
+      "role": "loot",
+      "talk": "herb",
+      "talkDone": "herbGone",
+      "grantItem": [
+        "bitterroot",
+        1
+      ]
+    },
+    {
+      "map": "veld",
+      "mark": "G",
+      "id": "gem",
+      "role": "loot",
+      "talk": "gemWild",
+      "talkDone": "gemGone",
+      "grantItem": [
+        "gem",
+        1
+      ]
+    },
+    {
+      "map": "veld",
+      "mark": "L",
+      "id": "stump",
+      "role": "loot",
+      "talk": "stump",
+      "talkDone": "stumpGone",
+      "grantItem": [
+        "bandage",
+        1
+      ]
+    },
+    {
+      "map": "veld",
+      "mark": "X",
+      "id": "cart",
+      "role": "talk",
+      "talk": "cart"
+    },
+    {
+      "map": "forest",
+      "mark": "1",
+      "id": "soldier1",
+      "role": "trainer",
+      "sprite": "npc/soldier"
+    },
+    {
+      "map": "forest",
+      "mark": "2",
+      "id": "soldier2",
+      "role": "trainer",
+      "sprite": "npc/soldier"
+    },
+    {
+      "map": "forest",
+      "mark": "3",
+      "id": "soldier3",
+      "role": "trainer",
+      "sprite": "npc/soldier"
+    },
+    {
+      "map": "grove",
+      "mark": "8",
+      "id": "cathleen",
+      "role": "trainer",
+      "talk": "cathleenSpot",
+      "talkDone": "cathleenAfter"
+    },
+    {
+      "map": "grove",
+      "mark": "9",
+      "id": "shinigami",
+      "role": "trainer",
+      "sprite": "shinigami",
+      "talk": "shinigamiSpot",
+      "talkDone": "shinigamiAfter"
+    },
+    {
+      "map": "grove",
+      "mark": "K",
+      "id": "cross",
+      "role": "trainer",
+      "sprite": "npc/cross",
+      "talk": "crossSpot",
+      "talkDone": "crossWin"
+    },
+    {
+      "map": "camp",
+      "mark": "I",
+      "id": "commander",
+      "role": "talk",
+      "sprite": "npc/commander",
+      "talk": "commander"
+    },
+    {
+      "map": "camp",
+      "mark": "K",
+      "id": "conscript",
+      "role": "trainer",
+      "sprite": "npc/conscript",
+      "talk": "conscriptSpot",
+      "talkDone": "conscriptWin"
+    },
+    {
+      "map": "camp",
+      "mark": "A",
+      "id": "enforcer",
+      "role": "trainer",
+      "sprite": "npc/enforcer",
+      "talk": "enforcerSpot",
+      "talkDone": "enforcerWin"
+    },
+    {
+      "map": "cliffs",
+      "mark": "V",
+      "id": "sentry",
+      "role": "trainer",
+      "sprite": "npc/sentry",
+      "talk": "sentrySpot",
+      "talkDone": "sentryWin"
+    },
+    {
+      "map": "cliffs",
+      "mark": "Y",
+      "id": "tessa",
+      "role": "talk",
+      "sprite": "npc/tessa",
+      "talk": "tessaFirst",
+      "talkDone": "tessaAgain",
+      "grantItem": [
+        "greatcrystal",
+        1
+      ]
+    },
+    {
+      "map": "cliffs",
+      "mark": "C",
+      "id": "chest",
+      "role": "loot",
+      "talk": "chest",
+      "talkDone": "chestEmpty"
+    },
+    {
+      "map": "ruins",
+      "mark": "J",
+      "id": "oren",
+      "role": "shop",
+      "sprite": "npc/oren",
+      "talk": "orenOpen"
+    },
+    {
+      "map": "ruins",
+      "mark": "K",
+      "id": "birch",
+      "role": "talk",
+      "sprite": "npc/birch",
+      "talk": "birchFirst",
+      "talkDone": "birchAgain",
+      "grantItem": [
+        "sunbalm",
+        1
+      ]
+    },
+    {
+      "map": "ruins",
+      "mark": "A",
+      "id": "sable",
+      "role": "talk",
+      "sprite": "npc/sable",
+      "talk": "sableFirst",
+      "talkDone": "sableAgain",
+      "grantItem": [
+        "warroot",
+        1
+      ]
+    }
+  ]
 }

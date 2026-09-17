@@ -253,7 +253,9 @@ def main() -> None:
     if args.out:
         outdir = args.out
     else:
-        cand = Path("/tmp/beelz/repo/crymon-dreamcast/src")
+        cand = ROOT / "ports" / "dreamcast" / "src"
+        if not cand.is_dir():
+            cand = Path("/tmp/beelz/repo/crymon-dreamcast/src")
         outdir = cand if cand.is_dir() else content.parent / "src"
     outdir.mkdir(parents=True, exist_ok=True)
     bake_maps(data, outdir / "content_maps.inc")
