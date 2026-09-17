@@ -1232,7 +1232,9 @@ static const u16 *const COMMANDER_FRAMES[4]  = { npc_commander_1, npc_commander_
 static const u16 *const CONSCRIPT_FRAMES[4]  = { npc_conscript_1, npc_conscript_2, npc_conscript_3, npc_conscript_4 };
 static const u16 *const ENFORCER_FRAMES[4]   = { npc_enforcer_1, npc_enforcer_2, npc_enforcer_3, npc_enforcer_4 };
 static const u16 *const SENTRY_FRAMES[4]     = { npc_sentry_1, npc_sentry_2, npc_sentry_3, npc_sentry_4 };
-static const u16 *const FATHER_FRAMES[4]     = { npc_father_1, npc_father_2, npc_father_3, npc_father_4 };
+/* npc_father_1..4 (Father's walk frames) aren't used -- he's bedridden
+   and only ever appears via his portrait (SPK_FATHER), never placed as
+   a WorldSprite. */
 
 static void collect_npcs(WorldSprite *list, int *n, int map_id, u32 frame_count,
                           int mason_state, float mason_x, float mason_y, int mason_dir, int mason_frame,
