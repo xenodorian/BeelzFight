@@ -1,4 +1,4 @@
-# CryMon — shared source, two (plus) ports
+# CryMon — shared source, two ports
 
 Web is the base. Dreamcast and the R36S SDL port consume the same content
 and the same sprites. Do not keep a second copy of the game in C tables.
@@ -9,7 +9,7 @@ public/sprites/           art source of truth
 src/game/                 web engine (loads JSON)
 native/                   R36S / PortMaster SDL2 (640×480)
 ports/dreamcast/          Dreamcast runtime (bakes JSON + sprites to C)
-backups/dreamcast-pre-fuse/  frozen DC snapshot from before the fuse
+backups/                  frozen snapshots of removed ports
 ```
 
 Repos:
@@ -88,6 +88,7 @@ tables. Handheld zip: `public/rom/CryMon-ports.zip`.
 ## Abandoned
 
 - SNES / `.sfc` / 65816. Do not restore.
+- LÖVE2D (`love/`). Do not restore. Lua snapshot is in `backups/love-port/`.
 
 ## Backups
 
@@ -95,3 +96,6 @@ tables. Handheld zip: `public/rom/CryMon-ports.zip`.
 tables, Claude's overnight reports, the old `gen_sprites.py`, and a tar
 of `art/` + placeholder sprites. Use it to remember a DC-only quirk.
 Do not copy those tables forward.
+
+`backups/love-port/` holds the Lua sources of the removed LÖVE port.
+Reference only.

@@ -20,6 +20,7 @@ Read [`CLAUDE.md`](CLAUDE.md) if you are Claude; same rules, DC-focused build st
 
 - Do not re-author maps, talk beats, or species tables inside `src/game/engine.ts`, `native/crymon.c`, or `ports/dreamcast/src/main.c`.
 - Do not revive the SNES port. It was abandoned; do not add `.sfc` / 65816 sources.
+- Do not revive the LÖVE2D port. It was abandoned; do not add `love/` sources.
 - Do not invent a second dialogue file "just for DC". Bake from JSON (uppercase happens in the baker).
 - Do not hand-edit `ports/dreamcast/src/content_*.inc` or `ports/dreamcast/src/sprites.h`.
 

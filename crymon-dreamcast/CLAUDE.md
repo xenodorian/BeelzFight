@@ -56,7 +56,7 @@ If CryMon sprites are missing, leftover `art/sprites/` is a fallback only.
 1. **Do not fork the story.** Weeping Army, Shinigami scroll, father/Heavenfall choice, Anne crystals ×5, Mason leave after battle, map-name banners (not dialogue on warp).
 2. **Heavenfall / father resurrection is narrative-only** unless the user asks to make them party members.
 3. **Do not touch Max's walk cycle** unless the user names Max.
-4. **No SNES port.** Abandoned.
+4. **No SNES port and no LÖVE2D port.** Both abandoned. Do not add `.sfc` / `love/` sources.
 5. **Placeholders:** if art is missing, tag `PLACEHOLDER_ART` and keep going. Do not silently reuse another character's sprite as a stand-in for a named NPC.
 6. Pre-fusion DC sources (hardcoded tables, old art pack) live in CryMon `backups/dreamcast-pre-fuse/`. Reference only.
 
