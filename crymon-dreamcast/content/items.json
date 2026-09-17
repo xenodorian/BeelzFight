@@ -1,0 +1,96 @@
+{
+  "order": [
+    "salve",
+    "bandage",
+    "bitterroot",
+    "dust",
+    "gem",
+    "sunbalm",
+    "warroot",
+    "smokebomb",
+    "greatcrystal"
+  ],
+  "defs": {
+    "gem": {
+      "id": "gem",
+      "name": "Capture Crystal",
+      "desc": "Moonstone cage. 5% per agility. Each % of HP missing adds 1%. Status or a lowered stat holds +25%.",
+      "battle": true,
+      "field": false,
+      "buy": 20,
+      "sell": 10
+    },
+    "salve": {
+      "id": "salve",
+      "name": "Moss salve",
+      "desc": "Restores 22 HP.",
+      "battle": true,
+      "field": true,
+      "buy": 10,
+      "sell": 5
+    },
+    "bitterroot": {
+      "id": "bitterroot",
+      "name": "Bitterroot",
+      "desc": "STR +4 this fight.",
+      "battle": true,
+      "field": false,
+      "buy": 8,
+      "sell": 4
+    },
+    "dust": {
+      "id": "dust",
+      "name": "Ash dust",
+      "desc": "Foe STR-3 AGI-2 SPC-2 this fight.",
+      "battle": true,
+      "field": false,
+      "buy": 8,
+      "sell": 4
+    },
+    "bandage": {
+      "id": "bandage",
+      "name": "Linen wrap",
+      "desc": "Restores 12 HP.",
+      "battle": true,
+      "field": true,
+      "buy": 6,
+      "sell": 3
+    },
+    "sunbalm": {
+      "id": "sunbalm",
+      "name": "Sunbalm",
+      "desc": "Restores 40 HP.",
+      "battle": true,
+      "field": true,
+      "buy": 18,
+      "sell": 9
+    },
+    "warroot": {
+      "id": "warroot",
+      "name": "Warroot",
+      "desc": "AGL +4 this fight.",
+      "battle": true,
+      "field": false,
+      "buy": 8,
+      "sell": 4
+    },
+    "smokebomb": {
+      "id": "smokebomb",
+      "name": "Smoke Bomb",
+      "desc": "Flee a wild fight.",
+      "battle": true,
+      "field": false,
+      "buy": 12,
+      "sell": 6
+    },
+    "greatcrystal": {
+      "id": "greatcrystal",
+      "name": "Greater Crystal",
+      "desc": "Capture Crystal with +25 chance.",
+      "battle": true,
+      "field": false,
+      "buy": 35,
+      "sell": 17
+    }
+  }
+}

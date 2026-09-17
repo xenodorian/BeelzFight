@@ -1,0 +1,966 @@
+{
+  "speakers": {
+    "max": "Max",
+    "anne": "Anne",
+    "mason": "Mason",
+    "wren": "Wren",
+    "mae": "Mae",
+    "ivo": "Ivo",
+    "nell": "Nell",
+    "pike": "Pike",
+    "calder": "Calder",
+    "bram": "Bram",
+    "cathleen": "Cathleen",
+    "shinigami": "Shinigami",
+    "oren": "Oren",
+    "tessa": "Tessa",
+    "birch": "Birch",
+    "sable": "Sable",
+    "cross": "Warden Cross",
+    "commander": "Commander",
+    "conscript": "Conscript",
+    "enforcer": "Enforcer",
+    "sentry": "Sentry",
+    "father": "Father",
+    "heavenfall": "Heavenfall",
+    "none": ""
+  },
+  "intro": [
+    "The cottage is quiet. Father sleeps. Outside, the Weeping Army drums.",
+    "Max is eight. CryMon \u2014 Crystal Monsters \u2014 sleep inside Capture Crystals.",
+    "Father is too sick to stand. His crystal sits on the shelf.",
+    "Quillpup is inside it. She will take the CryMon. CryTown does not get to fall."
+  ],
+  "endingWin": [
+    "Max stands at the edge of the Grove, the scroll empty in her hands.",
+    "The war isn't over. It isn't even close to over.",
+    "But for the first time since she left home, she isn't alone in it.",
+    "Thank you for playing the CryMon demo."
+  ],
+  "talk": {
+    "father": [
+      {
+        "speaker": "max",
+        "text": "The Weeping Army is at our gates, father."
+      },
+      {
+        "speaker": "max",
+        "text": "They burn what they don't steal. CryTown is already bleeding."
+      },
+      {
+        "speaker": "max",
+        "text": "You're too sick to fight them. I know that."
+      },
+      {
+        "speaker": "max",
+        "text": "So I'm taking your CryMon. Your Crystal Monster."
+      },
+      {
+        "speaker": "max",
+        "text": "It sleeps inside the crystal until someone cracks it open."
+      },
+      {
+        "speaker": "father",
+        "text": "Father does not wake. The Capture Crystal is still on the shelf."
+      }
+    ],
+    "fatherAfter": [
+      {
+        "speaker": "max",
+        "text": "I already took Quillpup. Sleep. I'll do the fighting."
+      },
+      {
+        "speaker": "father",
+        "text": "His breath is thin. He does not answer."
+      }
+    ],
+    "bed": [
+      {
+        "speaker": "max",
+        "text": "Just until they breathe again."
+      },
+      {
+        "speaker": "none",
+        "text": "Max's empty bed. The CryMon sleep. Cuts close. Specials return."
+      }
+    ],
+    "shelf": [
+      {
+        "speaker": "max",
+        "text": "This is it. Father's crystal. Quillpup is inside."
+      },
+      {
+        "speaker": "none",
+        "text": "The crystal breaks warm in her hands. Quillpup shakes out onto the floorboards."
+      },
+      {
+        "speaker": "max",
+        "text": "You're coming. CryTown doesn't get to fall."
+      }
+    ],
+    "shelfEmpty": [
+      {
+        "speaker": "max",
+        "text": "Dust. The crystal is already open."
+      }
+    ],
+    "doorLocked": [
+      {
+        "speaker": "max",
+        "text": "Not yet. Father's CryMon is still on the shelf."
+      }
+    ],
+    "crate": [
+      {
+        "speaker": "max",
+        "text": "A wrap. He won't miss it."
+      },
+      {
+        "speaker": "none",
+        "text": "A linen wrap under the lid. You take it."
+      }
+    ],
+    "crateEmpty": [
+      {
+        "speaker": "max",
+        "text": "Splinters and a moth. Empty."
+      }
+    ],
+    "doorOut": [
+      {
+        "speaker": "max",
+        "text": "Night air. I can do this."
+      },
+      {
+        "speaker": "none",
+        "text": "Tall grass hides CryMon. Wren west. Pond east. Bram on the path. Calder south."
+      }
+    ],
+    "footsteps": [
+      {
+        "speaker": "none",
+        "text": "Footsteps on the path. Someone followed you out."
+      }
+    ],
+    "masonFight": [
+      {
+        "speaker": "mason",
+        "text": "Max. Stop right there."
+      },
+      {
+        "speaker": "max",
+        "text": "Mason."
+      },
+      {
+        "speaker": "mason",
+        "text": "You walked out with your father's hound and a crystal in your fist."
+      },
+      {
+        "speaker": "mason",
+        "text": "Where are you going?"
+      },
+      {
+        "speaker": "max",
+        "text": "South. Past the Weeping Army's camp, to the Grove."
+      },
+      {
+        "speaker": "mason",
+        "text": "The Grove is a prison. Nobody walks out of the Grove."
+      },
+      {
+        "speaker": "max",
+        "text": "Shinigami is chained there. Locked up for necromancy."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm going to free him. He owes me power for it."
+      },
+      {
+        "speaker": "mason",
+        "text": "You're eight. You cannot win this war."
+      },
+      {
+        "speaker": "mason",
+        "text": "And you cannot bargain with a necromancer."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm not asking."
+      },
+      {
+        "speaker": "mason",
+        "text": "Then your CryMon faints here, and you go back inside where it's safe."
+      }
+    ],
+    "masonAfter": [
+      {
+        "speaker": "mason",
+        "text": "Fine. Calder is still south."
+      },
+      {
+        "speaker": "max",
+        "text": "I won't die first."
+      }
+    ],
+    "masonWin": [
+      {
+        "speaker": "none",
+        "text": "Mason spits in the dirt. His CryMon won't rise."
+      },
+      {
+        "speaker": "mason",
+        "text": "Go, then. But the camp guards the road south, and the Grove guards itself."
+      },
+      {
+        "speaker": "max",
+        "text": "I didn't ask for your blessing."
+      },
+      {
+        "speaker": "mason",
+        "text": "You didn't need it. You took it anyway."
+      }
+    ],
+    "wrenFirst": [
+      {
+        "speaker": "wren",
+        "text": "Too young. Take the salve. Calder camps south."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm not too young."
+      },
+      {
+        "speaker": "wren",
+        "text": "West is Ivo. East is Nell. Keep that hound fed."
+      }
+    ],
+    "wrenBeat": [
+      {
+        "speaker": "wren",
+        "text": "You beat him. The Weeping Army still wants more of us."
+      },
+      {
+        "speaker": "max",
+        "text": "Then it can wait."
+      }
+    ],
+    "wrenCart": [
+      {
+        "speaker": "wren",
+        "text": "You found their letter. They already knew your name."
+      },
+      {
+        "speaker": "max",
+        "text": "I read it anyway."
+      }
+    ],
+    "wrenHeal": [
+      {
+        "speaker": "wren",
+        "text": "Cuts bound. Specials return. Keep them fed."
+      },
+      {
+        "speaker": "max",
+        "text": "Thank you."
+      }
+    ],
+    "maeFirst": [
+      {
+        "speaker": "mae",
+        "text": "You're Max. I watched you leave the house."
+      },
+      {
+        "speaker": "max",
+        "text": "Don't follow me."
+      },
+      {
+        "speaker": "mae",
+        "text": "I won't. Take the wrap. Wren heals. I just didn't want the path empty."
+      }
+    ],
+    "maeAgain": [
+      {
+        "speaker": "mae",
+        "text": "I'll be here. South still drums."
+      },
+      {
+        "speaker": "max",
+        "text": "I hear them."
+      }
+    ],
+    "ivoFirst": [
+      {
+        "speaker": "ivo",
+        "text": "Camp took my CryMon. Chew this. Calder sits south."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm going south anyway."
+      },
+      {
+        "speaker": "ivo",
+        "text": "Don't give him a clean fight."
+      }
+    ],
+    "ivoAgain": [
+      {
+        "speaker": "ivo",
+        "text": "Hit first. Run if the bat folds you."
+      },
+      {
+        "speaker": "max",
+        "text": "I don't run yet."
+      }
+    ],
+    "nellFirst": [
+      {
+        "speaker": "nell",
+        "text": "Too young. Drink this anyway. Reeds hide a stone."
+      },
+      {
+        "speaker": "max",
+        "text": "I can hold a crystal."
+      }
+    ],
+    "nellBonus": [
+      {
+        "speaker": "nell",
+        "text": "That moth wasn't yours yesterday. Another salve."
+      },
+      {
+        "speaker": "max",
+        "text": "I caught it fair."
+      }
+    ],
+    "nellAgain": [
+      {
+        "speaker": "nell",
+        "text": "The pond keeps secrets. South still drums."
+      },
+      {
+        "speaker": "max",
+        "text": "I hear them."
+      }
+    ],
+    "pikeFirst": [
+      {
+        "speaker": "pike",
+        "text": "I dropped a moonstone in the east reeds. Don't tell Wren."
+      },
+      {
+        "speaker": "max",
+        "text": "I won't tell Wren."
+      }
+    ],
+    "pikeHelp": [
+      {
+        "speaker": "pike",
+        "text": "You found it? Keep the stone. Take this wrap."
+      },
+      {
+        "speaker": "max",
+        "text": "I was only looking."
+      }
+    ],
+    "pikeDone": [
+      {
+        "speaker": "pike",
+        "text": "The cliffs are just rocks. The war is the scary part."
+      },
+      {
+        "speaker": "max",
+        "text": "I know."
+      }
+    ],
+    "pikeHint": [
+      {
+        "speaker": "pike",
+        "text": "East of the path. In the tall grass by the water."
+      }
+    ],
+    "herb": [
+      {
+        "speaker": "max",
+        "text": "Bitterroot. STR +4 if I last."
+      }
+    ],
+    "herbGone": [
+      {
+        "speaker": "max",
+        "text": "A hole where the herb was. Only grit."
+      }
+    ],
+    "gemPike": [
+      {
+        "speaker": "max",
+        "text": "Pike's moonstone. He said keep it."
+      }
+    ],
+    "gemWild": [
+      {
+        "speaker": "max",
+        "text": "A Capture Crystal. Someone small lost this."
+      }
+    ],
+    "gemGone": [
+      {
+        "speaker": "max",
+        "text": "Mud and a frog. The stone is already mine."
+      }
+    ],
+    "stump": [
+      {
+        "speaker": "max",
+        "text": "A wrap jammed in the stump. I take it."
+      }
+    ],
+    "stumpGone": [
+      {
+        "speaker": "max",
+        "text": "Just a stump. Ants. No more cloth."
+      }
+    ],
+    "cart": [
+      {
+        "speaker": "max",
+        "text": "They already knew my name."
+      },
+      {
+        "speaker": "none",
+        "text": "A Weeping Army letter on the wreck. Send the cottage girl south. We need bodies."
+      }
+    ],
+    "calderAfter": [
+      {
+        "speaker": "calder",
+        "text": "South is the Weeping Army's camp. Don't die stupid."
+      },
+      {
+        "speaker": "max",
+        "text": "I don't plan to."
+      }
+    ],
+    "calderFight": [
+      {
+        "speaker": "calder",
+        "text": "The camp takes strays. One more won't be missed."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm not stray."
+      }
+    ],
+    "calderWin": [
+      {
+        "speaker": "none",
+        "text": "Calder falls. The path south is clear."
+      },
+      {
+        "speaker": "none",
+        "text": "The camp waits."
+      }
+    ],
+    "commander": [
+      {
+        "speaker": "commander",
+        "text": "So you're the one who dropped Calder."
+      },
+      {
+        "speaker": "commander",
+        "text": "CryTown sends an eight year old into our own camp. Pathetic little rat."
+      },
+      {
+        "speaker": "commander",
+        "text": "Get back on the road before we feed you to the Grove ourselves."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm already going there."
+      }
+    ],
+    "forestEnter": [
+      {
+        "speaker": "max",
+        "text": "The trees close over the path."
+      },
+      {
+        "speaker": "none",
+        "text": "Tall grass. Patrols. If they see you, they will come. The path keeps south."
+      }
+    ],
+    "forestLeave": [
+      {
+        "speaker": "max",
+        "text": "Back toward the cottage path."
+      }
+    ],
+    "groveEnter": [
+      {
+        "speaker": "max",
+        "text": "The grass dies out. Stone and hush."
+      },
+      {
+        "speaker": "none",
+        "text": "No tall grass. Something waits on the path."
+      }
+    ],
+    "groveLeave": [
+      {
+        "speaker": "max",
+        "text": "Back under the trees."
+      }
+    ],
+    "cathleenSpot": [
+      {
+        "speaker": "cathleen",
+        "text": "You walked the path to the door. I am what stands in front of it."
+      },
+      {
+        "speaker": "max",
+        "text": "You're a CryMon. Why guard a door?"
+      },
+      {
+        "speaker": "cathleen",
+        "text": "I am Cathleen. I guard Shinigami's door, and I carry its key."
+      },
+      {
+        "speaker": "cathleen",
+        "text": "Neither leaves without a fight."
+      }
+    ],
+    "cathleenAfter": [
+      {
+        "speaker": "cathleen",
+        "text": "You stand. The door is unbarred now. The key is yours either way."
+      },
+      {
+        "speaker": "max",
+        "text": "The door is enough for now."
+      }
+    ],
+    "cathleenGone": [
+      {
+        "speaker": "max",
+        "text": "Only the key's cold weight where she stood. The door is open now."
+      }
+    ],
+    "shinigamiSpot": [
+      {
+        "speaker": "shinigami",
+        "text": "Three names. Three graves. I keep them while this cage keeps me."
+      },
+      {
+        "speaker": "max",
+        "text": "I can free you. I need your power for it."
+      },
+      {
+        "speaker": "shinigami",
+        "text": "I don't bargain. I run. Stand aside or don't."
+      },
+      {
+        "speaker": "shinigami",
+        "text": "CryMare will move you either way."
+      }
+    ],
+    "shinigamiAfter": [
+      {
+        "speaker": "none",
+        "text": "Shinigami kneels. The CryMare won't rise again."
+      },
+      {
+        "speaker": "shinigami",
+        "text": "Fine. You hit harder than a door should."
+      },
+      {
+        "speaker": "max",
+        "text": "Give me the power. That was the deal."
+      },
+      {
+        "speaker": "shinigami",
+        "text": "Take the scroll, then. Legendary Reanimation."
+      },
+      {
+        "speaker": "shinigami",
+        "text": "It wakes what's already dead. Human or CryMon. Use it well, or don't."
+      },
+      {
+        "speaker": "shinigami",
+        "text": "I won't be here to care."
+      },
+      {
+        "speaker": "none",
+        "text": "Shinigami turns to fog before she can answer."
+      },
+      {
+        "speaker": "none",
+        "text": "The Grove is quiet where he stood."
+      },
+      {
+        "speaker": "none",
+        "text": "Her father. The scroll. This is why she came."
+      }
+    ],
+    "shinigamiDone": [
+      {
+        "speaker": "none",
+        "text": "The grass where he stood doesn't remember him."
+      }
+    ],
+    "soldierSpot": [
+      {
+        "speaker": "none",
+        "text": "A Weeping Army scout spots you. Out of the way, rat. This wood is ours."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm passing through."
+      }
+    ],
+    "soldierAfter": [
+      {
+        "speaker": "none",
+        "text": "The soldier sits. Go. Before I change my mind."
+      }
+    ],
+    "soldierDone": [
+      {
+        "speaker": "none",
+        "text": "They already lost. They will not rise."
+      }
+    ],
+    "bramOpen": [
+      {
+        "speaker": "bram",
+        "text": "Marks for moss, wraps, stones. Buy or sell."
+      },
+      {
+        "speaker": "max",
+        "text": "I have cuts. I need stones."
+      }
+    ],
+    "anneGift": [
+      {
+        "speaker": "anne",
+        "text": "Max. You actually fought."
+      },
+      {
+        "speaker": "anne",
+        "text": "Take these. Five crystals. Don't waste them on the first moth."
+      },
+      {
+        "speaker": "max",
+        "text": "I won't."
+      },
+      {
+        "speaker": "none",
+        "text": "Anne presses five Capture Crystals into Max's palm. Xtals +5."
+      }
+    ],
+    "anneAgain": [
+      {
+        "speaker": "anne",
+        "text": "Don't lose those. Calder is still south."
+      },
+      {
+        "speaker": "max",
+        "text": "I know the way."
+      }
+    ],
+    "anneReturn": [
+      {
+        "speaker": "anne",
+        "text": "Max. I hoped I wouldn't have to find you again."
+      },
+      {
+        "speaker": "max",
+        "text": "Anne. What happened?"
+      },
+      {
+        "speaker": "anne",
+        "text": "Your father. While you were fighting Cathleen. His breath just stopped."
+      },
+      {
+        "speaker": "max",
+        "text": "No. No, he was sleeping. He was just sleeping."
+      },
+      {
+        "speaker": "anne",
+        "text": "I'm sorry, Max. I didn't want you to hear it from anyone else."
+      },
+      {
+        "speaker": "max",
+        "text": "Shinigami is a necromancer. If anyone can undo this, it's him."
+      }
+    ],
+    "choiceFather": [
+      {
+        "speaker": "none",
+        "text": "Max unrolls the scroll over her father's still chest."
+      },
+      {
+        "speaker": "father",
+        "text": "His eyes open. He doesn't understand yet. Neither does she, not really."
+      },
+      {
+        "speaker": "max",
+        "text": "Whatever happens now, we face it together."
+      }
+    ],
+    "choiceHeavenfall": [
+      {
+        "speaker": "none",
+        "text": "Max unrolls the scroll over ground no one has dug in a thousand years."
+      },
+      {
+        "speaker": "heavenfall",
+        "text": "The sky cracks. Something ancient and enormous opens its eyes."
+      },
+      {
+        "speaker": "max",
+        "text": "Heavenfall is awake. The Weeping Army doesn't know yet what's coming."
+      }
+    ],
+    "sentrySpot": [
+      {
+        "speaker": "sentry",
+        "text": "A Weeping Army sentry blocks the rocks."
+      },
+      {
+        "speaker": "sentry",
+        "text": "Nothing up here but wind and a dead man's CryMon."
+      },
+      {
+        "speaker": "sentry",
+        "text": "We burn the fields so CryTown starves before it fights back."
+      },
+      {
+        "speaker": "max",
+        "text": "You're monsters."
+      },
+      {
+        "speaker": "sentry",
+        "text": "We're winning. That's all we are."
+      }
+    ],
+    "sentryWin": [
+      {
+        "speaker": "none",
+        "text": "The sentry goes down hard. The cliffs are quiet."
+      }
+    ],
+    "conscriptSpot": [
+      {
+        "speaker": "conscript",
+        "text": "Don't. Please. They'll whip me if I let you past."
+      },
+      {
+        "speaker": "max",
+        "text": "They made you do this?"
+      },
+      {
+        "speaker": "conscript",
+        "text": "They took my village first. Then they took me."
+      },
+      {
+        "speaker": "max",
+        "text": "I'm sorry. I still have to fight you."
+      }
+    ],
+    "conscriptWin": [
+      {
+        "speaker": "none",
+        "text": "The conscript slumps, almost relieved to lose."
+      }
+    ],
+    "enforcerSpot": [
+      {
+        "speaker": "enforcer",
+        "text": "Another rat from CryTown. Good. I was bored."
+      },
+      {
+        "speaker": "max",
+        "text": "I don't want to fight you."
+      },
+      {
+        "speaker": "enforcer",
+        "text": "Nobody ever does. That's why it's fun."
+      }
+    ],
+    "enforcerWin": [
+      {
+        "speaker": "none",
+        "text": "The enforcer spits teeth and a curse. He doesn't get up."
+      }
+    ],
+    "crossSpot": [
+      {
+        "speaker": "cross",
+        "text": "Warden Cross. The Weeping Army posted me here for a reason."
+      },
+      {
+        "speaker": "max",
+        "text": "To guard a prisoner?"
+      },
+      {
+        "speaker": "cross",
+        "text": "To guard a weapon. The generals wanted his necromancy."
+      },
+      {
+        "speaker": "cross",
+        "text": "For the front line."
+      },
+      {
+        "speaker": "cross",
+        "text": "An army of the dead, if he'd ever cooperated."
+      },
+      {
+        "speaker": "max",
+        "text": "He didn't. Now he never will."
+      }
+    ],
+    "crossWin": [
+      {
+        "speaker": "none",
+        "text": "Cross falls. Whatever he was guarding is already gone."
+      }
+    ],
+    "orenOpen": [
+      {
+        "speaker": "oren",
+        "text": "Marks for whatever survived the ruins. Buy or sell."
+      },
+      {
+        "speaker": "max",
+        "text": "What happened here?"
+      },
+      {
+        "speaker": "oren",
+        "text": "The Weeping Army did. I sell what they left behind."
+      }
+    ],
+    "tessaFirst": [
+      {
+        "speaker": "tessa",
+        "text": "You fought through the sentry? That's more than most manage."
+      },
+      {
+        "speaker": "max",
+        "text": "I had to."
+      },
+      {
+        "speaker": "tessa",
+        "text": "The Weeping Army watches these cliffs for ships. More of them are coming."
+      },
+      {
+        "speaker": "tessa",
+        "text": "Take this. You'll need it more than I will."
+      },
+      {
+        "speaker": "none",
+        "text": "Tessa presses a Greater Crystal into Max's hand."
+      }
+    ],
+    "tessaAgain": [
+      {
+        "speaker": "tessa",
+        "text": "Still watching the water. Still nothing good out there."
+      }
+    ],
+    "birchFirst": [
+      {
+        "speaker": "birch",
+        "text": "You came from the Grove? Then Shinigami's really gone."
+      },
+      {
+        "speaker": "max",
+        "text": "He is."
+      },
+      {
+        "speaker": "birch",
+        "text": "Good. Take this, for surviving him."
+      },
+      {
+        "speaker": "none",
+        "text": "Birch presses a Sunbalm into Max's hand."
+      }
+    ],
+    "birchAgain": [
+      {
+        "speaker": "birch",
+        "text": "The ruins don't change much. Still standing, I see."
+      }
+    ],
+    "sableFirst": [
+      {
+        "speaker": "sable",
+        "text": "The Weeping Army calls this place dead ground. They're not wrong."
+      },
+      {
+        "speaker": "max",
+        "text": "Why stay?"
+      },
+      {
+        "speaker": "sable",
+        "text": "Someone has to remember what stood here before them. Take this."
+      },
+      {
+        "speaker": "none",
+        "text": "Sable presses a Warroot into Max's palm."
+      }
+    ],
+    "sableAgain": [
+      {
+        "speaker": "sable",
+        "text": "Still remembering. Still here."
+      }
+    ],
+    "chest": [
+      {
+        "speaker": "max",
+        "text": "A chest wedged between the rocks."
+      },
+      {
+        "speaker": "none",
+        "text": "Inside: marks, and a handful of supplies."
+      }
+    ],
+    "chestEmpty": [
+      {
+        "speaker": "max",
+        "text": "Just splinters now. Already emptied."
+      }
+    ],
+    "cottage": [
+      {
+        "speaker": "max",
+        "text": "The cottage. Father in the bed. My bed. South door leaves."
+      }
+    ],
+    "lose": [
+      {
+        "speaker": "max",
+        "text": "We still breathe. Crawl back."
+      }
+    ],
+    "masonFight2": [
+      {
+        "speaker": "mason",
+        "text": "You. Again."
+      },
+      {
+        "speaker": "mason",
+        "text": "I trained since Calder fell. Three CryMon this time."
+      },
+      {
+        "speaker": "mason",
+        "text": "No mercy now."
+      }
+    ],
+    "masonWin2": [
+      {
+        "speaker": "none",
+        "text": "Mason kneels. Three down. He has nothing left to prove."
+      }
+    ]
+  }
+}

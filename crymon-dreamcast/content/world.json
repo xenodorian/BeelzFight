@@ -1,0 +1,272 @@
+{
+  "startBag": {
+    "gem": 0,
+    "salve": 2,
+    "bitterroot": 1,
+    "dust": 1,
+    "bandage": 2,
+    "sunbalm": 0,
+    "warroot": 0,
+    "smokebomb": 1,
+    "greatcrystal": 0
+  },
+  "startMarks": 16,
+  "mapNames": {
+    "house": "HOME",
+    "veld": "CRYTOWN",
+    "forest": "THE FOREST",
+    "grove": "THE GROVE",
+    "camp": "THE CAMP",
+    "cliffs": "THE CLIFFS",
+    "ruins": "THE RUINS"
+  },
+  "mapIds": [
+    "house",
+    "veld",
+    "forest",
+    "grove",
+    "camp",
+    "cliffs",
+    "ruins"
+  ],
+  "formulas": {
+    "capture": "5 * agl + missingHpPercent + bonus + (vulnerable ? 25 : 0), clamp 0..100",
+    "xpGain": "6 + foeLevel * 4",
+    "levelUp": "while xp >= level * 10 and level < 12: xp -= level*10; level++; maxHp+=3; str+=1; agl+=1; spc+=1",
+    "mintGrow": "1 + (level - 3) * 0.12",
+    "shinyOdds": "1/64",
+    "heal": {
+      "salve": 22,
+      "bandage": 12,
+      "sunbalm": 40
+    },
+    "encounterRate": 0.18
+  },
+  "encounters": [
+    {
+      "maps": [
+        "forest"
+      ],
+      "tile": "T",
+      "rate": 0.18,
+      "pool": [
+        "fenwisp",
+        "duskhorn",
+        "needleroot"
+      ],
+      "levelMin": 3,
+      "levelMax": 5
+    },
+    {
+      "maps": [
+        "cliffs"
+      ],
+      "tile": "T",
+      "rate": 0.18,
+      "pool": [
+        "stormwing",
+        "sableclaw",
+        "frostail",
+        "emberling",
+        "glasswisp",
+        "thornhide"
+      ],
+      "levelMin": 5,
+      "levelMax": 7
+    },
+    {
+      "maps": [
+        "veld"
+      ],
+      "tile": "T",
+      "rate": 0.18,
+      "pool": [
+        "glimmoth",
+        "tortcask",
+        "emberling",
+        "ashenmaw"
+      ],
+      "levelMin": 2,
+      "levelMax": 4,
+      "levelBonusIfTyGt": 14
+    }
+  ],
+  "warps": [
+    {
+      "from": "house",
+      "tile": "D",
+      "to": "veld",
+      "spawn": "D",
+      "dir": "down",
+      "oy": 44,
+      "need": "tookStarter",
+      "failTalk": "doorLocked",
+      "onArrive": "masonAmbush"
+    },
+    {
+      "from": "veld",
+      "tile": "D",
+      "to": "house",
+      "spawn": "D",
+      "dir": "up",
+      "oy": -32
+    },
+    {
+      "from": "veld",
+      "tile": "Z",
+      "to": "forest",
+      "spawn": "Y",
+      "dir": "down",
+      "oy": 40,
+      "onArrive": "ensureSoldiers"
+    },
+    {
+      "from": "forest",
+      "tile": "Y",
+      "to": "veld",
+      "spawn": "Z",
+      "dir": "up",
+      "oy": -32
+    },
+    {
+      "from": "forest",
+      "tile": "O",
+      "to": "grove",
+      "spawn": "O",
+      "dir": "down",
+      "oy": 40
+    },
+    {
+      "from": "grove",
+      "tile": "O",
+      "to": "forest",
+      "spawn": "O",
+      "dir": "up",
+      "oy": -32
+    },
+    {
+      "from": "veld",
+      "tile": "F",
+      "to": "camp",
+      "spawn": "D",
+      "dir": "down",
+      "oy": 40,
+      "need": "beatCalder"
+    },
+    {
+      "from": "camp",
+      "tile": "D",
+      "to": "veld",
+      "spawn": "F",
+      "dir": "up",
+      "oy": -32
+    },
+    {
+      "from": "veld",
+      "tile": "c",
+      "to": "cliffs",
+      "spawn": "D",
+      "dir": "down",
+      "oy": 40
+    },
+    {
+      "from": "cliffs",
+      "tile": "D",
+      "to": "veld",
+      "spawn": "c",
+      "dir": "up",
+      "oy": -32
+    },
+    {
+      "from": "grove",
+      "tile": "g",
+      "to": "ruins",
+      "spawn": "D",
+      "dir": "down",
+      "oy": 40,
+      "need": "beatShin"
+    },
+    {
+      "from": "ruins",
+      "tile": "D",
+      "to": "grove",
+      "spawn": "g",
+      "dir": "up",
+      "oy": -32
+    }
+  ],
+  "trainers": {
+    "sentry": {
+      "lead": [
+        "emberling",
+        5
+      ],
+      "bench": [
+        [
+          "frostail",
+          6
+        ],
+        [
+          "stormwing",
+          7
+        ]
+      ],
+      "title": "Sentry sends Emberling",
+      "name": "Sentry"
+    },
+    "conscript": {
+      "lead": [
+        "sableclaw",
+        7
+      ],
+      "bench": [
+        [
+          "boulderam",
+          8
+        ],
+        [
+          "ashenmaw",
+          9
+        ]
+      ],
+      "title": "Conscript sends Sableclaw",
+      "name": "Conscript"
+    },
+    "enforcer": {
+      "lead": [
+        "thornhide",
+        8
+      ],
+      "bench": [
+        [
+          "glasswisp",
+          9
+        ],
+        [
+          "duskhorn",
+          10
+        ]
+      ],
+      "title": "Enforcer sends Thornhide",
+      "name": "Enforcer"
+    },
+    "cross": {
+      "lead": [
+        "crymare",
+        9
+      ],
+      "bench": [
+        [
+          "ashenmaw",
+          10
+        ],
+        [
+          "boulderam",
+          11
+        ]
+      ],
+      "title": "Warden sends CryMare",
+      "name": "Warden Cross"
+    }
+  }
+}

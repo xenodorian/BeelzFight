@@ -10,12 +10,19 @@ LDFLAGS   = $(ARCHFLAGS) -nostdlib -nostartfiles -nodefaultlibs -T dc.ld -Wl,--b
 
 OBJS = src/start.o src/main.o
 
+CONTENT_JSON = $(wildcard content/*.json)
+CONTENT_INC  = src/content_maps.inc src/content_talk.inc \
+               src/content_species.inc src/content_items.inc
+
 all: crymon.elf
+
+$(CONTENT_INC): $(CONTENT_JSON) tools/bake_content.py
+	python3 tools/bake_content.py --content content --out src
 
 src/start.o: src/start.S
 	$(AS) $(ARCHFLAGS) -c -o $@ $<
 
-src/main.o: src/main.c
+src/main.o: src/main.c src/sprites.h $(CONTENT_INC)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # -lgcc: compiler-support routines (integer divide, struct-copy) GCC
