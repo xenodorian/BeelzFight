@@ -1,13 +1,12 @@
 # CryMon — shared source, two ports
 
-Web is the base. Dreamcast and the R36S SDL port consume the same content
-and the same sprites. Do not keep a second copy of the game in C tables.
+Web is the base. Dreamcast consumes the same content and the same sprites.
+Do not keep a second copy of the game in C tables.
 
 ```
 content/                  JSON source of truth
 public/sprites/           art source of truth
 src/game/                 web engine (loads JSON)
-native/                   R36S / PortMaster SDL2 (640×480)
 ports/dreamcast/          Dreamcast runtime (bakes JSON + sprites to C)
 backups/                  frozen snapshots of removed ports
 ```
@@ -31,8 +30,8 @@ Repos:
 
 **Per port (do not try to unify):**
 
-- Rendering (canvas vs PVR framebuffer vs SDL)
-- Input (keyboard / touch vs Maple vs gptokeyb)
+- Rendering (canvas vs PVR framebuffer)
+- Input (keyboard / touch vs Maple)
 - Audio
 - The battle/menu state machine implementation (same formulas, different code)
 
@@ -67,16 +66,6 @@ That is a display transform, not a second script.
 
 `src/content_*.inc` and `src/sprites.h` are generated. Never author them.
 
-## R36S / PortMaster
-
-```
-python3 native/pack_rom_zips.py    # packs public/sprites into gfx_blob.bin
-```
-
-`native/crymon.c` still has some inlined maps from an older sync. Prefer
-fixing it by reading `content/` (or a baked header) over growing those
-tables. Handheld zip: `public/rom/CryMon-ports.zip`.
-
 ## Workflow for a content change
 
 1. Edit `content/*.json` and/or `public/sprites/`.
@@ -89,6 +78,7 @@ tables. Handheld zip: `public/rom/CryMon-ports.zip`.
 
 - SNES / `.sfc` / 65816. Do not restore.
 - LÖVE2D (`love/`). Do not restore. Lua snapshot is in `backups/love-port/`.
+- SDL2 / R36S PortMaster (`native/`). Do not restore. C snapshot is in `backups/sdl-port/`.
 
 ## Backups
 
@@ -98,4 +88,7 @@ of `art/` + placeholder sprites. Use it to remember a DC-only quirk.
 Do not copy those tables forward.
 
 `backups/love-port/` holds the Lua sources of the removed LÖVE port.
+Reference only.
+
+`backups/sdl-port/` holds the C sources of the removed SDL2/R36S port.
 Reference only.
